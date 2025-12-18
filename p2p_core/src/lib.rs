@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub mod config;
 pub mod discovery;
+pub mod transfer;
+
 use discovery::DiscoveryService;
+use transfer::{TRANSFER_PORT, make_client_endpoint, make_server_endpoint};
 
 /// Magic bytes to identify our app's packets (6 bytes: "P2PLT\0")
 pub const MAGIC_BYTES: &[u8] = b"P2PLT\x00";
@@ -67,6 +71,14 @@ pub enum AppEvent {
     Error(String),
 }
 
+/// Get download directory
+fn get_download_dir() -> PathBuf {
+    directories::UserDirs::new()
+        .and_then(|dirs| dirs.download_dir().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("p2p_transfer")
+}
+
 /// New Thread
 /// cmd_rx: listent from GUI
 /// event_tx: send to GUI
@@ -78,8 +90,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         .and_then(|s| s.into_string().ok())
         .unwrap_or_else(|| "Unknown-PC".to_string());
 
-    // 2. Setup Ports (Hardcoded for now, ideal to be dynamic or config)
-    let tcp_port = 9000;
+    // 2. Setup Ports
     let discovery_port = 8888;
 
     // Send message to GUI
@@ -100,29 +111,65 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     };
 
-    // 4. Start Listening Loop
+    // 4. Init QUIC Server Endpoint
+    let server_addr: SocketAddr = format!("0.0.0.0:{}", TRANSFER_PORT).parse().unwrap();
+    let server_endpoint = match make_server_endpoint(server_addr) {
+        Ok(ep) => ep,
+        Err(e) => {
+            let _ = event_tx.send(AppEvent::Error(format!(
+                "Không thể khởi tạo QUIC server: {}",
+                e
+            )));
+            return;
+        }
+    };
+    let _ = event_tx.send(AppEvent::Status(format!(
+        "QUIC Server đang lắng nghe tại cổng {}",
+        TRANSFER_PORT
+    )));
+
+    // 5. Init QUIC Client Endpoint
+    let client_endpoint = match make_client_endpoint() {
+        Ok(ep) => Arc::new(ep),
+        Err(e) => {
+            let _ = event_tx.send(AppEvent::Error(format!(
+                "Không thể khởi tạo QUIC client: {}",
+                e
+            )));
+            return;
+        }
+    };
+
+    // 6. Start QUIC Server Loop
+    let download_dir = get_download_dir();
+    let server_event_tx = event_tx.clone();
+    tokio::spawn(async move {
+        transfer::run_server(server_endpoint, server_event_tx, download_dir).await;
+    });
+
+    // 7. Start Discovery Listening Loop
     discovery_service.start_listening(
         event_tx.clone(),
         my_peer_id.clone(),
         my_name.clone(),
-        tcp_port,
+        TRANSFER_PORT,
     );
 
-    // 5. Automatic Discovery Loop (Broadcast every 5 seconds)
+    // 8. Automatic Discovery Loop (Broadcast every 5 seconds)
     let ds_clone = discovery_service.clone();
     let peer_id_clone = my_peer_id.clone();
     let name_clone = my_name.clone();
     tokio::spawn(async move {
         // Broadcast immediately on start
         ds_clone
-            .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), tcp_port)
+            .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), TRANSFER_PORT)
             .await;
 
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
         loop {
             interval.tick().await;
             ds_clone
-                .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), tcp_port)
+                .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), TRANSFER_PORT)
                 .await;
         }
     });
@@ -134,12 +181,31 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 // Trigger manual discovery immediately
                 let _ = event_tx.send(AppEvent::Status("Đang quét thủ công...".to_string()));
                 discovery_service
-                    .send_discovery_request(my_peer_id.clone(), my_name.clone(), tcp_port)
+                    .send_discovery_request(my_peer_id.clone(), my_name.clone(), TRANSFER_PORT)
                     .await;
             }
             AppCommand::SendFile { target_ip, files } => {
-                let msg = format!("Đang chuẩn bị gửi {} file tới {}", files.len(), target_ip);
-                let _ = event_tx.send(AppEvent::Status(msg));
+                let target_addr: SocketAddr =
+                    match format!("{}:{}", target_ip, TRANSFER_PORT).parse() {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            let _ = event_tx
+                                .send(AppEvent::Error(format!("Địa chỉ không hợp lệ: {}", e)));
+                            continue;
+                        }
+                    };
+
+                let client_ep = client_endpoint.clone();
+                let event_tx_clone = event_tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        transfer::send_files(&client_ep, target_addr, files, event_tx_clone.clone())
+                            .await
+                    {
+                        let _ =
+                            event_tx_clone.send(AppEvent::Error(format!("Lỗi gửi file: {}", e)));
+                    }
+                });
             }
             AppCommand::CancelTransfer => {
                 let _ = event_tx.send(AppEvent::Status("Đã hủy tác vụ.".to_string()));
