@@ -7,7 +7,6 @@ pub fn show(ctx: &egui::Context, open: &mut bool, peers: &[String]) {
         .default_size([300.0, 200.0])
         .min_size([200.0, 150.0])
         .show(ctx, |ui| {
-            ui.heading("Nearby Devices");
             ui.label("Devices found on LAN:");
             ui.separator();
 
