@@ -27,8 +27,8 @@ struct PeerInfo {
 
 pub struct MyApp {
     // Channels
-    cmd_sender: mpsc::UnboundedSender<AppCommand>,
-    event_receiver: mpsc::UnboundedReceiver<AppEvent>,
+    cmd_sender: mpsc::Sender<AppCommand>,
+    event_receiver: mpsc::Receiver<AppEvent>,
 
     // App State
     ui_state: AppUIState,
@@ -40,10 +40,7 @@ pub struct MyApp {
 }
 
 impl MyApp {
-    pub fn new(
-        tx: mpsc::UnboundedSender<AppCommand>,
-        rx: mpsc::UnboundedReceiver<AppEvent>,
-    ) -> Self {
+    pub fn new(tx: mpsc::Sender<AppCommand>, rx: mpsc::Receiver<AppEvent>) -> Self {
         Self {
             cmd_sender: tx,
             event_receiver: rx,
@@ -62,8 +59,12 @@ impl eframe::App for MyApp {
                 AppEvent::Status(msg) => {
                     self.status_log.push(format!("Bot: {}", msg));
                 }
-                AppEvent::PeerFound { ip, hostname } => {
-                    // Update or insert peer
+                AppEvent::PeerFound {
+                    peer_id: _,
+                    ip,
+                    hostname,
+                } => {
+                    // Update or insert peer (using IP as key)
                     self.peers.insert(
                         ip.clone(),
                         PeerInfo {

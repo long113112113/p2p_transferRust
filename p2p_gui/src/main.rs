@@ -9,9 +9,9 @@ mod ui;
 use app::MyApp;
 
 fn main() -> Result<(), eframe::Error> {
-    // 1. Create channels
-    let (tx_cmd, rx_cmd) = mpsc::unbounded_channel::<AppCommand>();
-    let (tx_event, rx_event) = mpsc::unbounded_channel::<AppEvent>();
+    // 1. Create channels (bounded with capacity 1000 for backpressure)
+    let (tx_cmd, rx_cmd) = mpsc::channel::<AppCommand>(1000);
+    let (tx_event, rx_event) = mpsc::channel::<AppEvent>(1000);
 
     // 2. Spawn Backend thread
     thread::spawn(move || {

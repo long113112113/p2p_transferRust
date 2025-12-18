@@ -3,13 +3,25 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+pub mod config;
 pub mod discovery;
 use discovery::DiscoveryService;
 
+/// Magic bytes to identify our app's packets (6 bytes: "P2PLT\0")
+pub const MAGIC_BYTES: &[u8] = b"P2PLT\x00";
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DiscoveryMsg {
-    DiscoveryRequest { my_name: String, tcp_port: u16 },
-    DiscoveryResponse { my_name: String, tcp_port: u16 },
+    DiscoveryRequest {
+        peer_id: String,
+        my_name: String,
+        tcp_port: u16,
+    },
+    DiscoveryResponse {
+        peer_id: String,
+        my_name: String,
+        tcp_port: u16,
+    },
 }
 
 //Struct File metadata
@@ -41,6 +53,7 @@ pub enum AppEvent {
     Status(String),
 
     PeerFound {
+        peer_id: String,
         ip: String,
         hostname: String,
     },
@@ -57,11 +70,9 @@ pub enum AppEvent {
 /// New Thread
 /// cmd_rx: listent from GUI
 /// event_tx: send to GUI
-pub async fn run_backend(
-    mut cmd_rx: mpsc::UnboundedReceiver<AppCommand>,
-    event_tx: mpsc::UnboundedSender<AppEvent>,
-) {
-    // 1. Get Hostname
+pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc::Sender<AppEvent>) {
+    // 1. Get Peer ID and Hostname
+    let my_peer_id = config::get_or_create_peer_id();
     let my_name = hostname::get()
         .ok()
         .and_then(|s| s.into_string().ok())
@@ -90,22 +101,28 @@ pub async fn run_backend(
     };
 
     // 4. Start Listening Loop
-    discovery_service.start_listening(event_tx.clone(), my_name.clone(), tcp_port);
+    discovery_service.start_listening(
+        event_tx.clone(),
+        my_peer_id.clone(),
+        my_name.clone(),
+        tcp_port,
+    );
 
     // 5. Automatic Discovery Loop (Broadcast every 5 seconds)
     let ds_clone = discovery_service.clone();
+    let peer_id_clone = my_peer_id.clone();
     let name_clone = my_name.clone();
     tokio::spawn(async move {
         // Broadcast immediately on start
         ds_clone
-            .send_discovery_request(name_clone.clone(), tcp_port)
+            .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), tcp_port)
             .await;
 
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
         loop {
             interval.tick().await;
             ds_clone
-                .send_discovery_request(name_clone.clone(), tcp_port)
+                .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), tcp_port)
                 .await;
         }
     });
@@ -117,7 +134,7 @@ pub async fn run_backend(
                 // Trigger manual discovery immediately
                 let _ = event_tx.send(AppEvent::Status("Đang quét thủ công...".to_string()));
                 discovery_service
-                    .send_discovery_request(my_name.clone(), tcp_port)
+                    .send_discovery_request(my_peer_id.clone(), my_name.clone(), tcp_port)
                     .await;
             }
             AppCommand::SendFile { target_ip, files } => {

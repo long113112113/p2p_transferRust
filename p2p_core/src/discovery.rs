@@ -1,4 +1,4 @@
-use crate::{AppEvent, DiscoveryMsg};
+use crate::{AppEvent, DiscoveryMsg, MAGIC_BYTES};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
@@ -23,15 +23,20 @@ impl DiscoveryService {
     }
 
     /// Broadcast a "Hello I'm looking for peers" message
-    pub async fn send_discovery_request(&self, my_name: String, tcp_port: u16) {
-        let msg = DiscoveryMsg::DiscoveryRequest { my_name, tcp_port };
-        if let Ok(bytes) = serde_json::to_vec(&msg) {
+    pub async fn send_discovery_request(&self, peer_id: String, my_name: String, tcp_port: u16) {
+        let msg = DiscoveryMsg::DiscoveryRequest {
+            peer_id,
+            my_name,
+            tcp_port,
+        };
+        if let Ok(json_bytes) = serde_json::to_vec(&msg) {
+            // Prepend MAGIC_BYTES to identify our app's packets
+            let mut packet = MAGIC_BYTES.to_vec();
+            packet.extend_from_slice(&json_bytes);
+
             // Broadcast to 255.255.255.255
             let broadcast_addr = "255.255.255.255:8888";
-            // Note: In real world, 255.255.255.255 might not work on some OS/networks properly without specific interface binding.
-            // But for simple LAN it usually works.
-            // Port 8888 is hardcoded for discovery for now.
-            let _ = self.socket.send_to(&bytes, broadcast_addr).await;
+            let _ = self.socket.send_to(&packet, broadcast_addr).await;
         }
     }
 
@@ -39,71 +44,93 @@ impl DiscoveryService {
     pub async fn send_discovery_response(
         &self,
         target: SocketAddr,
+        peer_id: String,
         my_name: String,
         tcp_port: u16,
     ) {
-        let msg = DiscoveryMsg::DiscoveryResponse { my_name, tcp_port };
-        if let Ok(bytes) = serde_json::to_vec(&msg) {
-            let _ = self.socket.send_to(&bytes, target).await;
+        let msg = DiscoveryMsg::DiscoveryResponse {
+            peer_id,
+            my_name,
+            tcp_port,
+        };
+        if let Ok(json_bytes) = serde_json::to_vec(&msg) {
+            // Prepend MAGIC_BYTES to identify our app's packets
+            let mut packet = MAGIC_BYTES.to_vec();
+            packet.extend_from_slice(&json_bytes);
+
+            let _ = self.socket.send_to(&packet, target).await;
         }
     }
 
     /// Start listening loop
     pub fn start_listening(
         &self,
-        event_tx: mpsc::UnboundedSender<AppEvent>,
+        event_tx: mpsc::Sender<AppEvent>,
+        my_peer_id: String,
         my_name: String,
         my_tcp_port: u16,
     ) {
         let socket = self.socket.clone();
 
         tokio::spawn(async move {
-            let mut buf = [0u8; 1024];
+            let mut buf = [0u8; 2048]; // Increased buffer for magic bytes + json
             loop {
                 match socket.recv_from(&mut buf).await {
                     Ok((len, addr)) => {
-                        // Ignore our own packets if possible?
-                        // UDP multicast/broadcast often loops back.
-                        // We will filter by checking message content or relying on logic.
+                        // Check for MAGIC_BYTES prefix to filter only our app's packets
+                        if len < MAGIC_BYTES.len() || &buf[..MAGIC_BYTES.len()] != MAGIC_BYTES {
+                            // Not our packet, ignore silently
+                            continue;
+                        }
 
-                        let data = &buf[..len];
+                        // Extract JSON data after magic bytes
+                        let data = &buf[MAGIC_BYTES.len()..len];
+
                         if let Ok(msg) = serde_json::from_slice::<DiscoveryMsg>(data) {
                             match msg {
                                 DiscoveryMsg::DiscoveryRequest {
+                                    peer_id: remote_peer_id,
                                     my_name: remote_name,
                                     tcp_port: _remote_port,
                                 } => {
                                     // Someone is looking for peers.
-                                    // If it is NOT me (simple check by name/port comparison or just respond)
-                                    // For now we just respond to everyone, client logic can filter self.
-
-                                    // Don't respond to self
-                                    if remote_name != my_name {
+                                    // Don't respond to self (using peer_id for reliable check)
+                                    if remote_peer_id != my_peer_id {
                                         let response_msg = DiscoveryMsg::DiscoveryResponse {
+                                            peer_id: my_peer_id.clone(),
                                             my_name: my_name.clone(),
                                             tcp_port: my_tcp_port,
                                         };
-                                        if let Ok(resp_bytes) = serde_json::to_vec(&response_msg) {
-                                            let _ = socket.send_to(&resp_bytes, addr).await;
+                                        if let Ok(json_bytes) = serde_json::to_vec(&response_msg) {
+                                            let mut packet = MAGIC_BYTES.to_vec();
+                                            packet.extend_from_slice(&json_bytes);
+                                            let _ = socket.send_to(&packet, addr).await;
                                         }
 
-                                        // Also can treat this as "Peer found" immediately
-                                        let _ = event_tx.send(AppEvent::PeerFound {
-                                            ip: addr.ip().to_string(),
-                                            hostname: remote_name,
-                                        });
+                                        // Also treat this as "Peer found" immediately
+                                        let _ = event_tx
+                                            .send(AppEvent::PeerFound {
+                                                peer_id: remote_peer_id,
+                                                ip: addr.ip().to_string(),
+                                                hostname: remote_name,
+                                            })
+                                            .await;
                                     }
                                 }
                                 DiscoveryMsg::DiscoveryResponse {
+                                    peer_id: remote_peer_id,
                                     my_name: remote_name,
                                     ..
                                 } => {
                                     // Found a peer!
-                                    if remote_name != my_name {
-                                        let _ = event_tx.send(AppEvent::PeerFound {
-                                            ip: addr.ip().to_string(),
-                                            hostname: remote_name,
-                                        });
+                                    if remote_peer_id != my_peer_id {
+                                        let _ = event_tx
+                                            .send(AppEvent::PeerFound {
+                                                peer_id: remote_peer_id,
+                                                ip: addr.ip().to_string(),
+                                                hostname: remote_name,
+                                            })
+                                            .await;
                                     }
                                 }
                             }
