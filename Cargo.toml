@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "p2p_core",
+    "p2p_gui"
+]
+
+resolver = "2"
