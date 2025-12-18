@@ -109,12 +109,8 @@ impl eframe::App for MyApp {
             ui::windows::transfer::show(ctx, &mut self.ui_state.show_transfer);
         }
 
-        // Request repaint to ensure time-based updates happen even if no events
-        // But doing it every frame might be expensive.
-        // Instead, request it every second is enough for this UI, but for smooth UI just request it.
-        // Or conditionally request if we have peers.
-        if !self.peers.is_empty() {
-            ctx.request_repaint_after(Duration::from_secs(1));
-        }
+        // Request repaint periodically to poll for new events from backend
+        // This ensures we receive PeerFound events even when the peer list is empty
+        ctx.request_repaint_after(Duration::from_secs(1));
     }
 }
