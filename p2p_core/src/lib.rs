@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 pub mod config;
 pub mod discovery;
+pub mod pairing;
 pub mod transfer;
 
 use discovery::DiscoveryService;
@@ -46,10 +49,13 @@ pub enum AppCommand {
     ///Send file to specific IP and list of files
     SendFile {
         target_ip: String,
+        target_peer_id: String,
         files: Vec<PathBuf>,
     },
     ///Cancel transfer
     CancelTransfer,
+    /// User submitted verification code (sender side)
+    SubmitVerificationCode { target_ip: String, code: String },
 }
 //Struct report from Core to GUI
 #[derive(Debug, Clone)]
@@ -69,6 +75,25 @@ pub enum AppEvent {
     },
     TransferCompleted(String),
     Error(String),
+
+    /// Receiver: Show this code to user for verification
+    ShowVerificationCode {
+        code: String,
+        from_ip: String,
+        from_name: String,
+    },
+
+    /// Sender: Ask user to input verification code
+    RequestVerificationCode {
+        target_ip: String,
+    },
+
+    /// Verification/Pairing result
+    PairingResult {
+        success: bool,
+        peer_name: String,
+        message: String,
+    },
 }
 
 /// Get download directory
@@ -89,6 +114,9 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         .ok()
         .and_then(|s| s.into_string().ok())
         .unwrap_or_else(|| "Unknown-PC".to_string());
+
+    // Store pending verification channels (IP -> Sender)
+    let mut verification_pending: HashMap<String, oneshot::Sender<String>> = HashMap::new();
 
     // 2. Setup Ports
     let discovery_port = 8888;
@@ -184,7 +212,11 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                     .send_discovery_request(my_peer_id.clone(), my_name.clone(), TRANSFER_PORT)
                     .await;
             }
-            AppCommand::SendFile { target_ip, files } => {
+            AppCommand::SendFile {
+                target_ip,
+                target_peer_id: _target_peer_id,
+                files,
+            } => {
                 let target_addr: SocketAddr =
                     match format!("{}:{}", target_ip, TRANSFER_PORT).parse() {
                         Ok(addr) => addr,
@@ -195,12 +227,30 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                         }
                     };
 
+                // Create channel for verification code
+                let (code_tx, code_rx) = oneshot::channel();
+
+                // Store tx in map, keyed by IP
+                // Note: If multiple transfers to same IP, this overwrites.
+                // For MVP this is acceptable (assume one active handshake per peer).
+                verification_pending.insert(target_ip.clone(), code_tx);
+
                 let client_ep = client_endpoint.clone();
                 let event_tx_clone = event_tx.clone();
+                let my_peer_id_clone = my_peer_id.clone();
+                let my_name_clone = my_name.clone();
+
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        transfer::send_files(&client_ep, target_addr, files, event_tx_clone.clone())
-                            .await
+                    if let Err(e) = transfer::send_files(
+                        &client_ep,
+                        target_addr,
+                        files,
+                        event_tx_clone.clone(),
+                        my_peer_id_clone,
+                        my_name_clone,
+                        Some(code_rx),
+                    )
+                    .await
                     {
                         let _ =
                             event_tx_clone.send(AppEvent::Error(format!("Lỗi gửi file: {}", e)));
@@ -209,6 +259,27 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
             }
             AppCommand::CancelTransfer => {
                 let _ = event_tx.send(AppEvent::Status("Đã hủy tác vụ.".to_string()));
+                // Also clear any pending verifications?
+                // verification_pending.clear(); // Maybe not all
+            }
+            AppCommand::SubmitVerificationCode { target_ip, code } => {
+                if let Some(tx) = verification_pending.remove(&target_ip) {
+                    if let Err(_) = tx.send(code.clone()) {
+                        let _ = event_tx.send(AppEvent::Error(
+                            "Không thể gửi mã xác thực (task đã đóng)".to_string(),
+                        ));
+                    } else {
+                        let _ = event_tx.send(AppEvent::Status(format!(
+                            "Đã gửi mã xác thực cho {}",
+                            target_ip
+                        )));
+                    }
+                } else {
+                    let _ = event_tx.send(AppEvent::Error(format!(
+                        "Không tìm thấy phiên xác thực chờ cho {}",
+                        target_ip
+                    )));
+                }
             }
         }
     }

@@ -1,4 +1,5 @@
 use crate::ui;
+use crate::ui::windows::verify::{self, VerificationState};
 use eframe::egui;
 use p2p_core::{AppCommand, AppEvent};
 use std::collections::HashMap;
@@ -32,6 +33,7 @@ pub struct MyApp {
 
     // App State
     ui_state: AppUIState,
+    verification_state: VerificationState,
 
     // Data
     status_log: Vec<String>,
@@ -45,6 +47,7 @@ impl MyApp {
             cmd_sender: tx,
             event_receiver: rx,
             ui_state: AppUIState::default(),
+            verification_state: VerificationState::default(),
             status_log: Vec::new(),
             peers: HashMap::new(),
         }
@@ -74,6 +77,43 @@ impl eframe::App for MyApp {
                         },
                     );
                 }
+                AppEvent::ShowVerificationCode {
+                    code,
+                    from_ip,
+                    from_name,
+                } => {
+                    self.verification_state = VerificationState::ShowingCode {
+                        code,
+                        from_ip,
+                        from_name,
+                    };
+                }
+                AppEvent::RequestVerificationCode { target_ip } => {
+                    self.verification_state = VerificationState::InputtingCode {
+                        target_ip,
+                        code_input: String::new(),
+                        error_msg: None,
+                    };
+                }
+                AppEvent::PairingResult {
+                    success,
+                    peer_name,
+                    message,
+                } => {
+                    self.status_log
+                        .push(format!("Pairing with {}: {}", peer_name, message));
+
+                    if !success {
+                        if let VerificationState::InputtingCode { error_msg, .. } =
+                            &mut self.verification_state
+                        {
+                            *error_msg = Some(message);
+                            continue; // Keep window open to show error
+                        }
+                    }
+                    // Close verification window on success or if redundant
+                    self.verification_state = VerificationState::None;
+                }
                 _ => {}
             }
         }
@@ -99,6 +139,16 @@ impl eframe::App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Playground");
             ui.label("Drag and drop panels here.");
+
+            // Show status logs
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .max_height(100.0)
+                .show(ui, |ui| {
+                    for log in &self.status_log {
+                        ui.label(log);
+                    }
+                });
         });
 
         // 5. Draw Floating Windows
@@ -109,6 +159,9 @@ impl eframe::App for MyApp {
         if self.ui_state.show_transfer {
             ui::windows::transfer::show(ctx, &mut self.ui_state.show_transfer);
         }
+
+        // 6. Draw Verification Windows
+        verify::show_verification_windows(ctx, &mut self.verification_state, &self.cmd_sender);
 
         // Request repaint periodically to poll for new events from backend
         // This ensures we receive PeerFound events even when the peer list is empty

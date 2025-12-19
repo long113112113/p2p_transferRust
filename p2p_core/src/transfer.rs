@@ -4,12 +4,15 @@
 //! - Self-signed certificate generation
 //! - QUIC server endpoint (to receive files)
 //! - QUIC client endpoint (to send files)
+//! - Verification handshake with 4-digit code
 
+use crate::pairing;
 use crate::{AppEvent, FileInfo};
 use anyhow::{Result, anyhow};
 use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,6 +27,27 @@ pub const TRANSFER_PORT: u16 = 9000;
 /// Buffer size for file transfer (64KB)
 const BUFFER_SIZE: usize = 64 * 1024;
 
+/// Protocol messages for transfer handshake
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TransferMsg {
+    /// Sender initiates connection with their identity
+    PairingRequest { peer_id: String, peer_name: String },
+    /// Receiver responds: already paired, proceed
+    PairingAccepted,
+    /// Receiver responds: need verification, show code to user
+    VerificationRequired,
+    /// Sender submits the 4-digit code
+    VerificationCode { code: String },
+    /// Verification successful, can proceed with transfer
+    VerificationSuccess,
+    /// Verification failed
+    VerificationFailed { message: String },
+    /// File transfer metadata
+    FileMetadata { info: FileInfo },
+    /// Ready to receive file data
+    ReadyForData,
+}
+
 /// Generate a self-signed certificate for QUIC
 pub fn generate_self_signed_cert()
 -> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>)> {
@@ -31,6 +55,28 @@ pub fn generate_self_signed_cert()
     let key = PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der());
     let cert_der = CertificateDer::from(certified_key.cert.der().to_vec());
     Ok((vec![cert_der], key))
+}
+
+/// Send a protocol message over a bidirectional stream
+async fn send_msg(send: &mut quinn::SendStream, msg: &TransferMsg) -> Result<()> {
+    let json = serde_json::to_vec(msg)?;
+    let len = (json.len() as u32).to_be_bytes();
+    send.write_all(&len).await?;
+    send.write_all(&json).await?;
+    Ok(())
+}
+
+/// Receive a protocol message from a bidirectional stream
+async fn recv_msg(recv: &mut quinn::RecvStream) -> Result<TransferMsg> {
+    let mut len_buf = [0u8; 4];
+    recv.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+
+    let mut buf = vec![0u8; len];
+    recv.read_exact(&mut buf).await?;
+
+    let msg: TransferMsg = serde_json::from_slice(&buf)?;
+    Ok(msg)
 }
 
 /// Create a QUIC server endpoint
@@ -59,10 +105,12 @@ pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<Endpoint> {
 /// Create a QUIC client endpoint (skip certificate verification for P2P)
 pub fn make_client_endpoint() -> Result<Endpoint> {
     // Create client config that skips certificate verification (for self-signed certs)
-    let crypto = rustls::ClientConfig::builder()
+    let mut crypto = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
         .with_no_client_auth();
+
+    crypto.alpn_protocols = vec![b"p2p-transfer".to_vec()];
 
     let mut client_config = ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?,
@@ -143,8 +191,43 @@ pub async fn run_server(
             match incoming.await {
                 Ok(connection) => {
                     let remote_addr = connection.remote_address();
+                    // Accept the bidirectional stream for handshake
+                    match connection.accept_bi().await {
+                        Ok((mut send_stream, mut recv_stream)) => {
+                            if let Err(e) = handle_verification_handshake(
+                                &mut send_stream,
+                                &mut recv_stream,
+                                &event_tx,
+                                remote_addr,
+                            )
+                            .await
+                            {
+                                let _ = event_tx
+                                    .send(AppEvent::Error(format!(
+                                        "Lỗi xác thực ({}): {}",
+                                        remote_addr, e
+                                    )))
+                                    .await;
+                                return; // Stop if handshake fails
+                            }
+                        }
+                        Err(e) => {
+                            let _ = event_tx
+                                .send(AppEvent::Error(format!(
+                                    "Không thể mở kênh xác thực ({}): {}",
+                                    remote_addr, e
+                                )))
+                                .await;
+                            return;
+                        }
+                    }
+
+                    // Handshake success, now accept file streams
                     let _ = event_tx
-                        .send(AppEvent::Status(format!("Kết nối từ: {}", remote_addr)))
+                        .send(AppEvent::Status(format!(
+                            "Đã kết nối và xác thực: {}",
+                            remote_addr
+                        )))
                         .await;
 
                     // Accept uni-directional stream for file data
@@ -165,11 +248,96 @@ pub async fn run_server(
                 }
                 Err(e) => {
                     let _ = event_tx
-                        .send(AppEvent::Error(format!("Lỗi kết nối: {}", e)))
+                        .send(AppEvent::Error(format!("Lỗi kết nối QUIC: {}", e)))
                         .await;
                 }
             }
         });
+    }
+}
+
+/// Handle the verification handshake on the receiver side
+async fn handle_verification_handshake(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    event_tx: &mpsc::Sender<AppEvent>,
+    remote_addr: SocketAddr,
+) -> Result<()> {
+    // 1. Wait for PairingRequest
+    let msg = recv_msg(recv).await?;
+    let (peer_id, peer_name) = match msg {
+        TransferMsg::PairingRequest { peer_id, peer_name } => (peer_id, peer_name),
+        _ => return Err(anyhow!("Expected PairingRequest, got {:?}", msg)),
+    };
+
+    // 2. Check if already paired
+    if pairing::is_paired(&peer_id) {
+        // Already paired -> Accept
+        send_msg(send, &TransferMsg::PairingAccepted).await?;
+        let _ = event_tx
+            .send(AppEvent::PairingResult {
+                success: true,
+                peer_name: peer_name.clone(),
+                message: "Đã ghép đôi trước đó".to_string(),
+            })
+            .await;
+        return Ok(());
+    }
+
+    // 3. Not paired -> Require Verification
+    // Generate code
+    let code = pairing::generate_verification_code();
+
+    // Notify UI to show code
+    let _ = event_tx
+        .send(AppEvent::ShowVerificationCode {
+            code: code.clone(),
+            from_ip: remote_addr.ip().to_string(),
+            from_name: peer_name.clone(),
+        })
+        .await;
+
+    // Send challenge to sender
+    send_msg(send, &TransferMsg::VerificationRequired).await?;
+
+    // 4. Wait for VerificationCode
+    let msg = recv_msg(recv).await?;
+    match msg {
+        TransferMsg::VerificationCode {
+            code: received_code,
+        } => {
+            if received_code == code {
+                // Success
+                pairing::add_pairing(&peer_id, &peer_name);
+                send_msg(send, &TransferMsg::VerificationSuccess).await?;
+                let _ = event_tx
+                    .send(AppEvent::PairingResult {
+                        success: true,
+                        peer_name,
+                        message: "Xác thực thành công".to_string(),
+                    })
+                    .await;
+                Ok(())
+            } else {
+                // Failed
+                send_msg(
+                    send,
+                    &TransferMsg::VerificationFailed {
+                        message: "Mã không đúng".to_string(),
+                    },
+                )
+                .await?;
+                let _ = event_tx
+                    .send(AppEvent::PairingResult {
+                        success: false,
+                        peer_name,
+                        message: "Mã xác thực không đúng".to_string(),
+                    })
+                    .await;
+                Err(anyhow!("Verification failed: Wrong code"))
+            }
+        }
+        _ => Err(anyhow!("Expected VerificationCode, got {:?}", msg)),
     }
 }
 
@@ -244,6 +412,9 @@ pub async fn send_files(
     target_addr: SocketAddr,
     files: Vec<PathBuf>,
     event_tx: mpsc::Sender<AppEvent>,
+    my_peer_id: String,
+    my_name: String,
+    input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
 ) -> Result<()> {
     let _ = event_tx
         .send(AppEvent::Status(format!(
@@ -255,9 +426,25 @@ pub async fn send_files(
     // Connect to peer
     let connection = endpoint.connect(target_addr, "localhost")?.await?;
 
+    // Perform verification handshake
+    let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
+    if let Err(e) = perform_verification_handshake(
+        &mut send_stream,
+        &mut recv_stream,
+        &event_tx,
+        my_peer_id,
+        my_name,
+        target_addr,
+        input_code_rx,
+    )
+    .await
+    {
+        return Err(anyhow!("Handshake failed: {}", e));
+    }
+
     let _ = event_tx
         .send(AppEvent::Status(
-            "Đã kết nối. Bắt đầu gửi file...".to_string(),
+            "Đã kết nối và xác thực. Bắt đầu gửi file...".to_string(),
         ))
         .await;
 
@@ -274,6 +461,96 @@ pub async fn send_files(
     }
 
     Ok(())
+}
+
+/// Perform verification handshake on sender side
+async fn perform_verification_handshake(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    event_tx: &mpsc::Sender<AppEvent>,
+    my_peer_id: String,
+    my_name: String,
+    target_addr: SocketAddr,
+    input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
+) -> Result<()> {
+    // 1. Send PairingRequest
+    send_msg(
+        send,
+        &TransferMsg::PairingRequest {
+            peer_id: my_peer_id,
+            peer_name: my_name,
+        },
+    )
+    .await?;
+
+    // 2. Wait for response
+    let msg = recv_msg(recv).await?;
+    match msg {
+        TransferMsg::PairingAccepted => {
+            // Already paired
+            let _ = event_tx
+                .send(AppEvent::PairingResult {
+                    success: true,
+                    peer_name: "Unknown".to_string(),
+                    message: "Đã ghép đôi từ trước.".to_string(),
+                })
+                .await;
+            Ok(())
+        }
+        TransferMsg::VerificationRequired => {
+            // Need verification
+            let _ = event_tx
+                .send(AppEvent::RequestVerificationCode {
+                    target_ip: target_addr.ip().to_string(),
+                })
+                .await;
+
+            let _ = event_tx
+                .send(AppEvent::Status(
+                    "Vui lòng nhập mã xác thực trên máy kia...".to_string(),
+                ))
+                .await;
+
+            // Wait for user input from GUI via channel
+            let code = if let Some(rx) = input_code_rx {
+                match rx.await {
+                    Ok(c) => c,
+                    Err(_) => return Err(anyhow!("User cancelled verification input")),
+                }
+            } else {
+                return Err(anyhow!("No input channel provided for verification code"));
+            };
+
+            send_msg(send, &TransferMsg::VerificationCode { code }).await?;
+
+            // 3. Wait for final result
+            let result_msg = recv_msg(recv).await?;
+            match result_msg {
+                TransferMsg::VerificationSuccess => {
+                    let _ = event_tx
+                        .send(AppEvent::PairingResult {
+                            success: true,
+                            peer_name: "Unknown".to_string(),
+                            message: "Xác thực thành công".to_string(),
+                        })
+                        .await;
+                    Ok(())
+                }
+                TransferMsg::VerificationFailed { message } => {
+                    let _ = event_tx
+                        .send(AppEvent::PairingResult {
+                            success: false,
+                            peer_name: "Unknown".to_string(),
+                            message: message.clone(),
+                        })
+                        .await;
+                    Err(anyhow!("Verification failed: {}", message))
+                }
+                _ => Err(anyhow!("Unexpected response: {:?}", result_msg)),
+            }
+        }
+        _ => Err(anyhow!("Unexpected handshake response: {:?}", msg)),
+    }
 }
 
 /// Send a single file through the connection
