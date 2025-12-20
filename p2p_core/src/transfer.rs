@@ -713,31 +713,60 @@ async fn send_single_file(
     };
     let meta_json = serde_json::to_vec(&file_info)?;
     let meta_len = (meta_json.len() as u32).to_be_bytes();
+
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
+            "[DEBUG] Sending metadata: {} bytes",
+            meta_json.len()
+        )))
+        .await;
+
     send_stream.write_all(&meta_len).await?;
     send_stream.write_all(&meta_json).await?;
+
+    let _ = event_tx
+        .send(AppEvent::Status(
+            "[DEBUG] Metadata sent successfully.".to_string(),
+        ))
+        .await;
 
     // 2. Send file data
     let mut sent: u64 = 0;
     let mut buffer = vec![0u8; BUFFER_SIZE];
 
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
+            "[DEBUG] Starting to send file data: {} bytes",
+            file_size
+        )))
+        .await;
+
     loop {
         let n = file.read(&mut buffer).await?;
         if n == 0 {
+            let _ = event_tx
+                .send(AppEvent::Status(format!(
+                    "[DEBUG] File read complete. Total sent: {} bytes",
+                    sent
+                )))
+                .await;
             break;
         }
         send_stream.write_all(&buffer[..n]).await?;
         sent += n as u64;
 
-        // Report progress
-        let progress = (sent as f32 / file_size as f32) * 100.0;
-        let speed = format!("{:.1} KB/s", (sent as f64 / 1024.0)); // Simplified
-        let _ = event_tx
-            .send(AppEvent::TransferProgress {
-                file_name: file_name.clone(),
-                progress,
-                speed,
-            })
-            .await;
+        // Report progress (less frequent)
+        if sent == file_size || sent % (BUFFER_SIZE as u64 * 10) == 0 {
+            let progress = (sent as f32 / file_size as f32) * 100.0;
+            let speed = format!("{:.1} KB/s", (sent as f64 / 1024.0)); // Simplified
+            let _ = event_tx
+                .send(AppEvent::TransferProgress {
+                    file_name: file_name.clone(),
+                    progress,
+                    speed,
+                })
+                .await;
+        }
     }
 
     // Finish stream
