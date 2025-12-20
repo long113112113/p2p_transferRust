@@ -204,7 +204,7 @@ pub async fn run_server(
                             {
                                 let _ = event_tx
                                     .send(AppEvent::Error(format!(
-                                        "Lỗi xác thực ({}): {}",
+                                        "Verification error ({}): {}",
                                         remote_addr, e
                                     )))
                                     .await;
@@ -214,7 +214,7 @@ pub async fn run_server(
                         Err(e) => {
                             let _ = event_tx
                                 .send(AppEvent::Error(format!(
-                                    "Không thể mở kênh xác thực ({}): {}",
+                                    "Cannot open verification channel ({}): {}",
                                     remote_addr, e
                                 )))
                                 .await;
@@ -225,7 +225,7 @@ pub async fn run_server(
                     // Handshake success, now accept file streams
                     let _ = event_tx
                         .send(AppEvent::Status(format!(
-                            "Đã kết nối và xác thực: {}",
+                            "Connected and verified: {}",
                             remote_addr
                         )))
                         .await;
@@ -240,7 +240,7 @@ pub async fn run_server(
                                 receive_file(&mut recv_stream, &download_dir, &event_tx).await
                             {
                                 let _ = event_tx
-                                    .send(AppEvent::Error(format!("Lỗi nhận file: {}", e)))
+                                    .send(AppEvent::Error(format!("Receive file error: {}", e)))
                                     .await;
                             }
                         });
@@ -248,7 +248,7 @@ pub async fn run_server(
                 }
                 Err(e) => {
                     let _ = event_tx
-                        .send(AppEvent::Error(format!("Lỗi kết nối QUIC: {}", e)))
+                        .send(AppEvent::Error(format!("QUIC connection error: {}", e)))
                         .await;
                 }
             }
@@ -278,7 +278,7 @@ async fn handle_verification_handshake(
             .send(AppEvent::PairingResult {
                 success: true,
                 peer_name: peer_name.clone(),
-                message: "Đã ghép đôi trước đó".to_string(),
+                message: "Previously paired".to_string(),
             })
             .await;
         return Ok(());
@@ -314,7 +314,7 @@ async fn handle_verification_handshake(
                     .send(AppEvent::PairingResult {
                         success: true,
                         peer_name,
-                        message: "Xác thực thành công".to_string(),
+                        message: "Verification successful".to_string(),
                     })
                     .await;
                 Ok(())
@@ -323,7 +323,7 @@ async fn handle_verification_handshake(
                 send_msg(
                     send,
                     &TransferMsg::VerificationFailed {
-                        message: "Mã không đúng".to_string(),
+                        message: "Invalid code".to_string(),
                     },
                 )
                 .await?;
@@ -331,7 +331,7 @@ async fn handle_verification_handshake(
                     .send(AppEvent::PairingResult {
                         success: false,
                         peer_name,
-                        message: "Mã xác thực không đúng".to_string(),
+                        message: "Invalid verification code".to_string(),
                     })
                     .await;
                 Err(anyhow!("Verification failed: Wrong code"))
@@ -359,7 +359,7 @@ async fn receive_file(
 
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "Đang nhận: {} ({} bytes)",
+            "Receiving: {} ({} bytes)",
             file_info.file_name, file_info.file_size
         )))
         .await;
@@ -417,10 +417,7 @@ pub async fn send_files(
     input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
 ) -> Result<()> {
     let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "Đang kết nối tới: {}",
-            target_addr
-        )))
+        .send(AppEvent::Status(format!("Connecting to: {}", target_addr)))
         .await;
 
     // Connect to peer
@@ -444,7 +441,7 @@ pub async fn send_files(
 
     let _ = event_tx
         .send(AppEvent::Status(
-            "Đã kết nối và xác thực. Bắt đầu gửi file...".to_string(),
+            "Connected and verified. Starting file transfer...".to_string(),
         ))
         .await;
 
@@ -452,7 +449,7 @@ pub async fn send_files(
         if let Err(e) = send_single_file(&connection, &file_path, &event_tx).await {
             let _ = event_tx
                 .send(AppEvent::Error(format!(
-                    "Lỗi gửi {}: {}",
+                    "Error sending {}: {}",
                     file_path.display(),
                     e
                 )))
@@ -492,7 +489,7 @@ async fn perform_verification_handshake(
                 .send(AppEvent::PairingResult {
                     success: true,
                     peer_name: "Unknown".to_string(),
-                    message: "Đã ghép đôi từ trước.".to_string(),
+                    message: "Previously paired.".to_string(),
                 })
                 .await;
             Ok(())
@@ -507,7 +504,7 @@ async fn perform_verification_handshake(
 
             let _ = event_tx
                 .send(AppEvent::Status(
-                    "Vui lòng nhập mã xác thực trên máy kia...".to_string(),
+                    "Please enter the verification code on the other device...".to_string(),
                 ))
                 .await;
 
@@ -531,7 +528,7 @@ async fn perform_verification_handshake(
                         .send(AppEvent::PairingResult {
                             success: true,
                             peer_name: "Unknown".to_string(),
-                            message: "Xác thực thành công".to_string(),
+                            message: "Verification successful".to_string(),
                         })
                         .await;
                     Ok(())
@@ -571,7 +568,7 @@ async fn send_single_file(
 
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "Đang gửi: {} ({} bytes)",
+            "Sending: {} ({} bytes)",
             file_name, file_size
         )))
         .await;

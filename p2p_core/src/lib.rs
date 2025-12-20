@@ -201,7 +201,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         match cmd {
             AppCommand::StartDiscovery => {
                 // Trigger manual discovery immediately
-                let _ = event_tx.send(AppEvent::Status("Đang quét thủ công...".to_string()));
+                let _ = event_tx.send(AppEvent::Status("Manual scanning...".to_string()));
                 discovery_service
                     .send_discovery_request(my_peer_id.clone(), my_name.clone(), TRANSFER_PORT)
                     .await;
@@ -211,15 +211,15 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 target_peer_id: _target_peer_id,
                 files,
             } => {
-                let target_addr: SocketAddr =
-                    match format!("{}:{}", target_ip, TRANSFER_PORT).parse() {
-                        Ok(addr) => addr,
-                        Err(e) => {
-                            let _ = event_tx
-                                .send(AppEvent::Error(format!("Địa chỉ không hợp lệ: {}", e)));
-                            continue;
-                        }
-                    };
+                let target_addr: SocketAddr = match format!("{}:{}", target_ip, TRANSFER_PORT)
+                    .parse()
+                {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        let _ = event_tx.send(AppEvent::Error(format!("Invalid address: {}", e)));
+                        continue;
+                    }
+                };
 
                 // Create channel for verification code
                 let (code_tx, code_rx) = oneshot::channel();
@@ -247,12 +247,12 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                     .await
                     {
                         let _ =
-                            event_tx_clone.send(AppEvent::Error(format!("Lỗi gửi file: {}", e)));
+                            event_tx_clone.send(AppEvent::Error(format!("Send file error: {}", e)));
                     }
                 });
             }
             AppCommand::CancelTransfer => {
-                let _ = event_tx.send(AppEvent::Status("Đã hủy tác vụ.".to_string()));
+                let _ = event_tx.send(AppEvent::Status("Task cancelled.".to_string()));
                 // Also clear any pending verifications?
                 // verification_pending.clear(); // Maybe not all
             }
@@ -260,17 +260,17 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 if let Some(tx) = verification_pending.remove(&target_ip) {
                     if let Err(_) = tx.send(code.clone()) {
                         let _ = event_tx.send(AppEvent::Error(
-                            "Không thể gửi mã xác thực (task đã đóng)".to_string(),
+                            "Cannot send verification code (task closed)".to_string(),
                         ));
                     } else {
                         let _ = event_tx.send(AppEvent::Status(format!(
-                            "Đã gửi mã xác thực cho {}",
+                            "Verification code sent to {}",
                             target_ip
                         )));
                     }
                 } else {
                     let _ = event_tx.send(AppEvent::Error(format!(
-                        "Không tìm thấy phiên xác thực chờ cho {}",
+                        "No pending verification session found for {}",
                         target_ip
                     )));
                 }

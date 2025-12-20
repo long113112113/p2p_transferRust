@@ -40,22 +40,22 @@ pub fn show_verification_windows(
             from_ip,
             from_name,
         } => {
-            egui::Window::new("Yêu cầu kết nối")
+            egui::Window::new("Connection Request")
                 .collapsible(false)
                 .resizable(false)
                 .open(&mut open)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .show(ctx, |ui| {
                     ui.label(format!(
-                        "Thiết bị '{}' ({}) muốn gửi file cho bạn.",
+                        "Device '{}' ({}) wants to send you a file.",
                         from_name, from_ip
                     ));
                     ui.add_space(10.0);
-                    ui.label("Mã xác thực của bạn là:");
+                    ui.label("Your verification code is:");
                     ui.add_space(5.0);
                     ui.heading(code.as_str());
                     ui.add_space(15.0);
-                    if ui.button("Đóng").clicked() {
+                    if ui.button("Close").clicked() {
                         should_close = true;
                     }
                 });
@@ -68,14 +68,14 @@ pub fn show_verification_windows(
             let mut submit_clicked = false;
             let mut submitted_code = String::new();
 
-            egui::Window::new("Nhập mã xác thực")
+            egui::Window::new("Enter Verification Code")
                 .collapsible(false)
                 .resizable(false)
                 .open(&mut open)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .show(ctx, |ui| {
                     ui.label(format!(
-                        "Nhập mã đang hiển thị trên thiết bị đích ({})",
+                        "Enter the code displayed on the target device ({})",
                         target_ip
                     ));
                     ui.add_space(10.0);
@@ -87,7 +87,7 @@ pub fn show_verification_windows(
                     }
 
                     ui.add_space(10.0);
-                    if ui.button("Gửi mã").clicked()
+                    if ui.button("Submit Code").clicked()
                         || (response.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)))
                     {
                         submit_clicked = true;
@@ -101,13 +101,9 @@ pub fn show_verification_windows(
                     let target_ip_clone = target_ip.clone();
                     let code_clone = submitted_code;
 
-                    tokio::spawn(async move {
-                        let _ = cmd_tx
-                            .send(AppCommand::SubmitVerificationCode {
-                                target_ip: target_ip_clone,
-                                code: code_clone,
-                            })
-                            .await;
+                    let _ = cmd_tx.blocking_send(AppCommand::SubmitVerificationCode {
+                        target_ip: target_ip_clone,
+                        code: code_clone,
                     });
                     should_close = true;
                 } else {
