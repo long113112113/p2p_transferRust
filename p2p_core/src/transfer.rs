@@ -183,7 +183,17 @@ pub async fn run_server(
     event_tx: mpsc::Sender<AppEvent>,
     download_dir: PathBuf,
 ) {
+    let _ = event_tx
+        .send(AppEvent::Status(
+            "[DEBUG] QUIC Server running, waiting for connections...".to_string(),
+        ))
+        .await;
     while let Some(incoming) = endpoint.accept().await {
+        let _ = event_tx
+            .send(AppEvent::Status(
+                "[DEBUG] Incoming connection received.".to_string(),
+            ))
+            .await;
         let event_tx = event_tx.clone();
         let download_dir = download_dir.clone();
 
@@ -231,7 +241,17 @@ pub async fn run_server(
                         .await;
 
                     // Accept uni-directional stream for file data
+                    let _ = event_tx
+                        .send(AppEvent::Status(
+                            "[DEBUG] Waiting for file streams...".to_string(),
+                        ))
+                        .await;
                     while let Ok(mut recv_stream) = connection.accept_uni().await {
+                        let _ = event_tx
+                            .send(AppEvent::Status(
+                                "[DEBUG] New file stream accepted.".to_string(),
+                            ))
+                            .await;
                         let event_tx = event_tx.clone();
                         let download_dir = download_dir.clone();
 
@@ -419,6 +439,12 @@ pub async fn send_files(
 ) -> Result<()> {
     let _ = event_tx
         .send(AppEvent::Status(format!(
+            "[DEBUG] send_files called. Target: {}, Files: {:?}",
+            target_addr, files
+        )))
+        .await;
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
             "Đang kết nối tới: {} ({})",
             target_peer_name, target_addr
         )))
@@ -450,13 +476,34 @@ pub async fn send_files(
         ))
         .await;
 
-    for file_path in files {
-        if let Err(e) = send_single_file(&connection, &file_path, &event_tx).await {
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
+            "[DEBUG] Starting file transfer. Total files: {}",
+            files.len()
+        )))
+        .await;
+    for (idx, file_path) in files.iter().enumerate() {
+        let _ = event_tx
+            .send(AppEvent::Status(format!(
+                "[DEBUG] Sending file {}/{}: {}",
+                idx + 1,
+                files.len(),
+                file_path.display()
+            )))
+            .await;
+        if let Err(e) = send_single_file(&connection, file_path, &event_tx).await {
             let _ = event_tx
                 .send(AppEvent::Error(format!(
                     "Error sending {}: {}",
                     file_path.display(),
                     e
+                )))
+                .await;
+        } else {
+            let _ = event_tx
+                .send(AppEvent::Status(format!(
+                    "[DEBUG] File sent successfully: {}",
+                    file_path.display()
                 )))
                 .await;
         }
@@ -562,6 +609,13 @@ async fn send_single_file(
     file_path: &PathBuf,
     event_tx: &mpsc::Sender<AppEvent>,
 ) -> Result<()> {
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
+            "[DEBUG] send_single_file: Opening file {}",
+            file_path.display()
+        )))
+        .await;
+
     // Open file
     let mut file = File::open(file_path).await?;
     let metadata = file.metadata().await?;
@@ -580,7 +634,17 @@ async fn send_single_file(
         .await;
 
     // Open uni-directional stream
+    let _ = event_tx
+        .send(AppEvent::Status(
+            "[DEBUG] Opening uni-directional stream...".to_string(),
+        ))
+        .await;
     let mut send_stream = connection.open_uni().await?;
+    let _ = event_tx
+        .send(AppEvent::Status(
+            "[DEBUG] Uni-directional stream opened.".to_string(),
+        ))
+        .await;
 
     // 1. Send metadata
     let file_info = FileInfo {
@@ -618,7 +682,13 @@ async fn send_single_file(
     }
 
     // Finish stream
+    let _ = event_tx
+        .send(AppEvent::Status("[DEBUG] Finishing stream...".to_string()))
+        .await;
     send_stream.finish()?;
+    let _ = event_tx
+        .send(AppEvent::Status("[DEBUG] Stream finished.".to_string()))
+        .await;
 
     let _ = event_tx.send(AppEvent::TransferCompleted(file_name)).await;
 

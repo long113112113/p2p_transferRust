@@ -137,7 +137,24 @@ impl eframe::App for MyApp {
                     // Close verification window on success or if redundant
                     self.verification_state = VerificationState::None;
                 }
-                _ => {}
+                AppEvent::TransferProgress {
+                    file_name,
+                    progress,
+                    speed,
+                } => {
+                    self.status_log.push(format!(
+                        "[Transfer] {} - {:.1}% @ {}",
+                        file_name, progress, speed
+                    ));
+                }
+                AppEvent::TransferCompleted(file_name) => {
+                    self.status_log
+                        .push(format!("[Transfer Complete] {}", file_name));
+                    self.refresh_local_files();
+                }
+                AppEvent::Error(msg) => {
+                    self.status_log.push(format!("[ERROR] {}", msg));
+                }
             }
         }
 
