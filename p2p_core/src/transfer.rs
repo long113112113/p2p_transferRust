@@ -774,6 +774,32 @@ async fn send_single_file(
         .send(AppEvent::Status("[DEBUG] Finishing stream...".to_string()))
         .await;
     send_stream.finish()?;
+
+    // Wait for the receiver to acknowledge all data was received
+    // This prevents the connection from being dropped while receiver is still reading
+    let _ = event_tx
+        .send(AppEvent::Status(
+            "[DEBUG] Waiting for stream to close...".to_string(),
+        ))
+        .await;
+    match send_stream.stopped().await {
+        Ok(_) => {
+            let _ = event_tx
+                .send(AppEvent::Status(
+                    "[DEBUG] Stream closed by receiver.".to_string(),
+                ))
+                .await;
+        }
+        Err(e) => {
+            // Ignore errors here - receiver might not send STOP_SENDING
+            let _ = event_tx
+                .send(AppEvent::Status(format!(
+                    "[DEBUG] Stream stopped with: {:?}",
+                    e
+                )))
+                .await;
+        }
+    }
     let _ = event_tx
         .send(AppEvent::Status("[DEBUG] Stream finished.".to_string()))
         .await;
