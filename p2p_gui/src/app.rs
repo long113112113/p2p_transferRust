@@ -153,7 +153,12 @@ impl eframe::App for MyApp {
 
         // 5. Draw Floating Windows
         if self.ui_state.show_devices {
-            ui::windows::devices::show(ctx, &mut self.ui_state.show_devices, &peer_list);
+            ui::windows::devices::show(
+                ctx,
+                &mut self.ui_state.show_devices,
+                &peer_list,
+                &self.cmd_sender,
+            );
         }
 
         if self.ui_state.show_transfer {
