@@ -19,7 +19,7 @@ fn test_packet_building_with_magic_bytes() {
     let msg = DiscoveryMsg::DiscoveryRequest {
         peer_id: "test-id".to_string(),
         my_name: "TestPC".to_string(),
-        tcp_port: 9000,
+        port: 9000,
     };
 
     // Build packet like DiscoveryService does
@@ -38,7 +38,7 @@ fn test_packet_parsing_with_magic_bytes() {
     let original_msg = DiscoveryMsg::DiscoveryResponse {
         peer_id: "parse-test".to_string(),
         my_name: "ParsePC".to_string(),
-        tcp_port: 8888,
+        port: 8888,
     };
 
     // Build packet
@@ -61,11 +61,11 @@ fn test_packet_parsing_with_magic_bytes() {
         DiscoveryMsg::DiscoveryResponse {
             peer_id,
             my_name,
-            tcp_port,
+            port,
         } => {
             assert_eq!(peer_id, "parse-test");
             assert_eq!(my_name, "ParsePC");
-            assert_eq!(tcp_port, 8888);
+            assert_eq!(port, 8888);
         }
         _ => panic!("Expected DiscoveryResponse"),
     }

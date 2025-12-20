@@ -22,12 +22,12 @@ pub enum DiscoveryMsg {
     DiscoveryRequest {
         peer_id: String,
         my_name: String,
-        tcp_port: u16,
+        port: u16,
     },
     DiscoveryResponse {
         peer_id: String,
         my_name: String,
-        tcp_port: u16,
+        port: u16,
     },
 }
 
@@ -123,7 +123,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
 
     // Send message to GUI
     let _ = event_tx.send(AppEvent::Status(format!(
-        "Backend khởi động. Tên: {}",
+        "Backend started. Name: {}",
         my_name
     )));
 
@@ -132,7 +132,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         Ok(ds) => Arc::new(ds),
         Err(e) => {
             let _ = event_tx.send(AppEvent::Error(format!(
-                "Không thể bind cổng {}: {}",
+                "Cant bind port {}: {}",
                 discovery_port, e
             )));
             return;
@@ -144,15 +144,12 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     let server_endpoint = match make_server_endpoint(server_addr) {
         Ok(ep) => ep,
         Err(e) => {
-            let _ = event_tx.send(AppEvent::Error(format!(
-                "Không thể khởi tạo QUIC server: {}",
-                e
-            )));
+            let _ = event_tx.send(AppEvent::Error(format!("Cant init QUIC server: {}", e)));
             return;
         }
     };
     let _ = event_tx.send(AppEvent::Status(format!(
-        "QUIC Server đang lắng nghe tại cổng {}",
+        "QUIC Server listening at port {}",
         TRANSFER_PORT
     )));
 
@@ -160,10 +157,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     let client_endpoint = match make_client_endpoint() {
         Ok(ep) => Arc::new(ep),
         Err(e) => {
-            let _ = event_tx.send(AppEvent::Error(format!(
-                "Không thể khởi tạo QUIC client: {}",
-                e
-            )));
+            let _ = event_tx.send(AppEvent::Error(format!("Cant init QUIC client: {}", e)));
             return;
         }
     };

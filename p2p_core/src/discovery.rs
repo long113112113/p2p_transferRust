@@ -22,15 +22,15 @@ impl DiscoveryService {
         })
     }
 
-    /// Broadcast a "Hello I'm looking for peers" message
-    pub async fn send_discovery_request(&self, peer_id: String, my_name: String, tcp_port: u16) {
+    /// Broadcast to local
+    pub async fn send_discovery_request(&self, peer_id: String, my_name: String, port: u16) {
         let msg = DiscoveryMsg::DiscoveryRequest {
             peer_id,
             my_name,
-            tcp_port,
+            port,
         };
         if let Ok(json_bytes) = serde_json::to_vec(&msg) {
-            // Prepend MAGIC_BYTES to identify our app's packets
+            // Add identify bytes
             let mut packet = MAGIC_BYTES.to_vec();
             packet.extend_from_slice(&json_bytes);
 
@@ -40,21 +40,21 @@ impl DiscoveryService {
         }
     }
 
-    /// Reply directly to a specific peer saying "I am here"
+    /// Reply directly to a specific peer
     pub async fn send_discovery_response(
         &self,
         target: SocketAddr,
         peer_id: String,
         my_name: String,
-        tcp_port: u16,
+        port: u16,
     ) {
         let msg = DiscoveryMsg::DiscoveryResponse {
             peer_id,
             my_name,
-            tcp_port,
+            port,
         };
         if let Ok(json_bytes) = serde_json::to_vec(&msg) {
-            // Prepend MAGIC_BYTES to identify our app's packets
+            // Add identify bytes
             let mut packet = MAGIC_BYTES.to_vec();
             packet.extend_from_slice(&json_bytes);
 
@@ -68,7 +68,7 @@ impl DiscoveryService {
         event_tx: mpsc::Sender<AppEvent>,
         my_peer_id: String,
         my_name: String,
-        my_tcp_port: u16,
+        my_port: u16,
     ) {
         let socket = self.socket.clone();
 
@@ -77,13 +77,13 @@ impl DiscoveryService {
             loop {
                 match socket.recv_from(&mut buf).await {
                     Ok((len, addr)) => {
-                        // Check for MAGIC_BYTES prefix to filter only our app's packets
+                        // Check identify packet
                         if len < MAGIC_BYTES.len() || &buf[..MAGIC_BYTES.len()] != MAGIC_BYTES {
-                            // Not our packet, ignore silently
+                            //ignore
                             continue;
                         }
 
-                        // Extract JSON data after magic bytes
+                        // Extract JSON data after identify bytes
                         let data = &buf[MAGIC_BYTES.len()..len];
 
                         if let Ok(msg) = serde_json::from_slice::<DiscoveryMsg>(data) {
@@ -91,15 +91,14 @@ impl DiscoveryService {
                                 DiscoveryMsg::DiscoveryRequest {
                                     peer_id: remote_peer_id,
                                     my_name: remote_name,
-                                    tcp_port: _remote_port,
+                                    port: _remote_port,
                                 } => {
-                                    // Someone is looking for peers.
-                                    // Don't respond to self (using peer_id for reliable check)
+                                    //ignore self
                                     if remote_peer_id != my_peer_id {
                                         let response_msg = DiscoveryMsg::DiscoveryResponse {
                                             peer_id: my_peer_id.clone(),
                                             my_name: my_name.clone(),
-                                            tcp_port: my_tcp_port,
+                                            port: my_port,
                                         };
                                         if let Ok(json_bytes) = serde_json::to_vec(&response_msg) {
                                             let mut packet = MAGIC_BYTES.to_vec();
@@ -107,7 +106,7 @@ impl DiscoveryService {
                                             let _ = socket.send_to(&packet, addr).await;
                                         }
 
-                                        // Also treat this as "Peer found" immediately
+                                        //treat this as "Peer found" immediately
                                         let _ = event_tx
                                             .send(AppEvent::PeerFound {
                                                 peer_id: remote_peer_id,
@@ -122,7 +121,7 @@ impl DiscoveryService {
                                     my_name: remote_name,
                                     ..
                                 } => {
-                                    // Found a peer!
+                                    //Found a peer
                                     if remote_peer_id != my_peer_id {
                                         let _ = event_tx
                                             .send(AppEvent::PeerFound {
@@ -137,7 +136,6 @@ impl DiscoveryService {
                         }
                     }
                     Err(_) => {
-                        // Error reading socket
                         break;
                     }
                 }
