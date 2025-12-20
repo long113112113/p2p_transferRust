@@ -50,6 +50,7 @@ pub enum AppCommand {
     SendFile {
         target_ip: String,
         target_peer_id: String,
+        target_peer_name: String,
         files: Vec<PathBuf>,
     },
     ///Cancel transfer
@@ -209,6 +210,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
             AppCommand::SendFile {
                 target_ip,
                 target_peer_id: _target_peer_id,
+                target_peer_name,
                 files,
             } => {
                 let target_addr: SocketAddr = match format!("{}:{}", target_ip, TRANSFER_PORT)
@@ -242,6 +244,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                         event_tx_clone.clone(),
                         my_peer_id_clone,
                         my_name_clone,
+                        target_peer_name,
                         Some(code_rx),
                     )
                     .await

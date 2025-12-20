@@ -49,6 +49,7 @@ async fn spawn_client_transfer(
             client_ev_tx,
             "client_id_001".to_string(),
             "ClientPC".to_string(),
+            "ServerPC".to_string(),
             code_rx,
         )
         .await;

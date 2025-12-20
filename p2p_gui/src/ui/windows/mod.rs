@@ -1,3 +1,3 @@
 pub mod devices;
-pub mod transfer;
+pub mod files;
 pub mod verify;

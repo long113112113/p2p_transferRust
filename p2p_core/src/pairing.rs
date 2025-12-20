@@ -2,69 +2,11 @@
 //!
 //! Stores paired peer IDs with 24-hour expiry.
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
+use crate::config::{AppConfig, PairedDevice};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Pairing expires after 24 hours
 const PAIRING_EXPIRY_SECS: u64 = 24 * 60 * 60;
-
-/// File name for paired devices storage
-const PAIRED_DEVICES_FILE: &str = "paired_devices.json";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PairedDevice {
-    peer_id: String,
-    peer_name: String,
-    /// Unix timestamp when pairing was established
-    paired_at: u64,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct PairingStore {
-    devices: HashMap<String, PairedDevice>,
-}
-
-/// Get the path to paired devices file
-fn get_pairing_file_path() -> Option<PathBuf> {
-    if let Ok(test_path) = std::env::var("P2P_TEST_CONFIG_DIR") {
-        return Some(PathBuf::from(test_path).join(PAIRED_DEVICES_FILE));
-    }
-    directories::ProjectDirs::from("com", "p2p", "p2p_transfer")
-        .map(|dirs| dirs.config_dir().join(PAIRED_DEVICES_FILE))
-}
-
-/// Load pairing store from disk
-fn load_store() -> PairingStore {
-    let path = match get_pairing_file_path() {
-        Some(p) => p,
-        None => return PairingStore::default(),
-    };
-
-    match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => PairingStore::default(),
-    }
-}
-
-/// Save pairing store to disk
-fn save_store(store: &PairingStore) {
-    let path = match get_pairing_file_path() {
-        Some(p) => p,
-        None => return,
-    };
-
-    // Ensure config directory exists
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-
-    if let Ok(json) = serde_json::to_string_pretty(store) {
-        let _ = fs::write(&path, json);
-    }
-}
 
 /// Get current Unix timestamp
 fn now_timestamp() -> u64 {
@@ -76,9 +18,9 @@ fn now_timestamp() -> u64 {
 
 /// Check if a peer is already paired and not expired
 pub fn is_paired(peer_id: &str) -> bool {
-    let store = load_store();
+    let config = AppConfig::load();
 
-    if let Some(device) = store.devices.get(peer_id) {
+    if let Some(device) = config.pairing.get(peer_id) {
         let now = now_timestamp();
         let elapsed = now.saturating_sub(device.paired_at);
         return elapsed < PAIRING_EXPIRY_SECS;
@@ -89,9 +31,9 @@ pub fn is_paired(peer_id: &str) -> bool {
 
 /// Add a new pairing (or update existing)
 pub fn add_pairing(peer_id: &str, peer_name: &str) {
-    let mut store = load_store();
+    let mut config = AppConfig::load();
 
-    store.devices.insert(
+    config.pairing.insert(
         peer_id.to_string(),
         PairedDevice {
             peer_id: peer_id.to_string(),
@@ -100,23 +42,23 @@ pub fn add_pairing(peer_id: &str, peer_name: &str) {
         },
     );
 
-    // Clean up expired pairings while we're at it
-    remove_expired(&mut store);
+    // Clean up expired pairings
+    remove_expired(&mut config);
 
-    save_store(&store);
+    config.save();
 }
 
 /// Remove a specific pairing
 pub fn remove_pairing(peer_id: &str) {
-    let mut store = load_store();
-    store.devices.remove(peer_id);
-    save_store(&store);
+    let mut config = AppConfig::load();
+    config.pairing.remove(peer_id);
+    config.save();
 }
 
 /// Remove all expired pairings
-fn remove_expired(store: &mut PairingStore) {
+fn remove_expired(config: &mut AppConfig) {
     let now = now_timestamp();
-    store.devices.retain(|_, device| {
+    config.pairing.retain(|_, device| {
         let elapsed = now.saturating_sub(device.paired_at);
         elapsed < PAIRING_EXPIRY_SECS
     });
@@ -124,11 +66,11 @@ fn remove_expired(store: &mut PairingStore) {
 
 /// Get all currently valid pairings (for debugging/UI)
 pub fn get_all_pairings() -> Vec<(String, String)> {
-    let mut store = load_store();
-    remove_expired(&mut store);
+    let mut config = AppConfig::load();
+    remove_expired(&mut config);
 
-    store
-        .devices
+    config
+        .pairing
         .values()
         .map(|d| (d.peer_id.clone(), d.peer_name.clone()))
         .collect()

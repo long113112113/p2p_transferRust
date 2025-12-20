@@ -414,10 +414,14 @@ pub async fn send_files(
     event_tx: mpsc::Sender<AppEvent>,
     my_peer_id: String,
     my_name: String,
+    target_peer_name: String,
     input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
 ) -> Result<()> {
     let _ = event_tx
-        .send(AppEvent::Status(format!("Connecting to: {}", target_addr)))
+        .send(AppEvent::Status(format!(
+            "Đang kết nối tới: {} ({})",
+            target_peer_name, target_addr
+        )))
         .await;
 
     // Connect to peer
@@ -431,6 +435,7 @@ pub async fn send_files(
         &event_tx,
         my_peer_id,
         my_name,
+        target_peer_name.clone(),
         target_addr,
         input_code_rx,
     )
@@ -467,6 +472,7 @@ async fn perform_verification_handshake(
     event_tx: &mpsc::Sender<AppEvent>,
     my_peer_id: String,
     my_name: String,
+    target_peer_name: String,
     target_addr: SocketAddr,
     input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
 ) -> Result<()> {
@@ -488,8 +494,8 @@ async fn perform_verification_handshake(
             let _ = event_tx
                 .send(AppEvent::PairingResult {
                     success: true,
-                    peer_name: "Unknown".to_string(),
-                    message: "Previously paired.".to_string(),
+                    peer_name: target_peer_name,
+                    message: "Đã ghép đôi từ trước.".to_string(),
                 })
                 .await;
             Ok(())
@@ -504,7 +510,7 @@ async fn perform_verification_handshake(
 
             let _ = event_tx
                 .send(AppEvent::Status(
-                    "Please enter the verification code on the other device...".to_string(),
+                    "Vui lòng nhập mã xác thực trên máy kia...".to_string(),
                 ))
                 .await;
 
@@ -527,8 +533,8 @@ async fn perform_verification_handshake(
                     let _ = event_tx
                         .send(AppEvent::PairingResult {
                             success: true,
-                            peer_name: "Unknown".to_string(),
-                            message: "Verification successful".to_string(),
+                            peer_name: target_peer_name,
+                            message: "Xác thực thành công".to_string(),
                         })
                         .await;
                     Ok(())
@@ -537,7 +543,7 @@ async fn perform_verification_handshake(
                     let _ = event_tx
                         .send(AppEvent::PairingResult {
                             success: false,
-                            peer_name: "Unknown".to_string(),
+                            peer_name: target_peer_name,
                             message: message.clone(),
                         })
                         .await;

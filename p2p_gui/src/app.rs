@@ -8,14 +8,14 @@ use tokio::sync::mpsc;
 
 pub struct AppUIState {
     pub show_devices: bool,
-    pub show_transfer: bool,
+    pub show_files: bool,
 }
 
 impl Default for AppUIState {
     fn default() -> Self {
         Self {
             show_devices: false,
-            show_transfer: false,
+            show_files: false,
         }
     }
 }
@@ -39,18 +39,41 @@ pub struct MyApp {
     status_log: Vec<String>,
     // Key: IP address (unique identifier for now)
     peers: HashMap<String, PeerInfo>,
+
+    // File Management
+    download_path: std::path::PathBuf,
+    local_files: Vec<String>,
 }
 
 impl MyApp {
     pub fn new(tx: mpsc::Sender<AppCommand>, rx: mpsc::Receiver<AppEvent>) -> Self {
-        Self {
+        let mut app = Self {
             cmd_sender: tx,
             event_receiver: rx,
             ui_state: AppUIState::default(),
             verification_state: VerificationState::default(),
             status_log: Vec::new(),
             peers: HashMap::new(),
+            download_path: p2p_core::config::AppConfig::load().download_path,
+            local_files: Vec::new(),
+        };
+        app.refresh_local_files();
+        app
+    }
+    pub fn refresh_local_files(&mut self) {
+        self.local_files.clear();
+        if let Ok(entries) = std::fs::read_dir(&self.download_path) {
+            for entry in entries.flatten() {
+                if let Ok(meta) = entry.metadata() {
+                    if meta.is_file() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            self.local_files.push(name.to_string());
+                        }
+                    }
+                }
+            }
         }
+        self.local_files.sort();
     }
 }
 
@@ -161,8 +184,42 @@ impl eframe::App for MyApp {
             );
         }
 
-        if self.ui_state.show_transfer {
-            ui::windows::transfer::show(ctx, &mut self.ui_state.show_transfer);
+        if self.ui_state.show_files {
+            // Clone for closure if needed, but here we can pass mutable references directly
+            // temporary closure to handle refresh
+            // We need to mutate self.local_files, so we can't borrow self immutably for 'files' AND mutably for 'refresh' callback easily if specific structure isn't split.
+            // Simplification: trigger refresh flag.
+
+            // Refactor: We can't pass a closure that borrows 'self' while 'self' is already borrowed.
+            // We will handle refresh logic *after* the UI call if a flag is returned, or imply it from state change.
+            // For now, let's just re-scan if needed.
+
+            // Actually, simplest way in immediate mode:
+            // Files panel takes &mut PathBuf and &Vec<String>.
+            // If path changes, we detect it here.
+
+            let current_path = self.download_path.clone(); // Clone to detect change
+            let mut trigger_refresh = false;
+
+            ui::windows::files::show(
+                ctx,
+                &mut self.ui_state.show_files,
+                &mut self.download_path,
+                &self.local_files,
+                || {
+                    trigger_refresh = true;
+                },
+            );
+
+            if self.download_path != current_path || trigger_refresh {
+                if self.download_path != current_path {
+                    // Save config if path changed
+                    let mut config = p2p_core::config::AppConfig::load();
+                    config.download_path = self.download_path.clone();
+                    config.save();
+                }
+                self.refresh_local_files();
+            }
         }
 
         // 6. Draw Verification Windows

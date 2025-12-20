@@ -20,10 +20,10 @@ pub fn show(ctx: &egui::Context, state: &mut AppUIState) {
 
                 // Transfers button with phosphor icon
                 if ui
-                    .selectable_label(state.show_transfer, format!("{} Transfers", FOLDER_SIMPLE))
+                    .selectable_label(state.show_files, format!("{} Files", FOLDER_SIMPLE))
                     .clicked()
                 {
-                    state.show_transfer = !state.show_transfer;
+                    state.show_files = !state.show_files;
                 }
             });
         });
