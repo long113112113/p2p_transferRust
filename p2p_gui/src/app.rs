@@ -29,6 +29,13 @@ struct PeerInfo {
     last_seen: Instant,
 }
 
+struct TransferState {
+    file_name: String,
+    progress: f32,
+    speed: String,
+    is_sending: bool,
+}
+
 pub struct MyApp {
     // Channels
     cmd_sender: mpsc::Sender<AppCommand>,
@@ -46,6 +53,7 @@ pub struct MyApp {
     // File Management
     download_path: std::path::PathBuf,
     local_files: Vec<String>,
+    active_transfers: HashMap<String, TransferState>,
 }
 
 impl MyApp {
@@ -59,6 +67,7 @@ impl MyApp {
             peers: HashMap::new(),
             download_path: p2p_core::config::get_download_dir(),
             local_files: Vec::new(),
+            active_transfers: HashMap::new(),
         };
         app.refresh_local_files();
         app
@@ -86,7 +95,7 @@ impl eframe::App for MyApp {
         while let Ok(event) = self.event_receiver.try_recv() {
             match event {
                 AppEvent::Status(msg) => {
-                    self.status_log.push(format!("Bot: {}", msg));
+                    self.status_log.push(format!("{}", msg));
                 }
                 AppEvent::PeerFound {
                     peer_id: _,
@@ -140,11 +149,22 @@ impl eframe::App for MyApp {
                     // Close verification window on success or if redundant
                     self.verification_state = VerificationState::None;
                 }
+
                 AppEvent::TransferProgress {
                     file_name,
                     progress,
                     speed,
+                    is_sending,
                 } => {
+                    self.active_transfers.insert(
+                        file_name.clone(),
+                        TransferState {
+                            file_name: file_name.clone(),
+                            progress,
+                            speed: speed.clone(),
+                            is_sending,
+                        },
+                    );
                     self.status_log.push(format!(
                         "[Transfer] {} - {:.1}% @ {}",
                         file_name, progress, speed
@@ -153,6 +173,7 @@ impl eframe::App for MyApp {
                 AppEvent::TransferCompleted(file_name) => {
                     self.status_log
                         .push(format!("[Transfer Complete] {}", file_name));
+                    self.active_transfers.remove(&file_name);
                     self.refresh_local_files();
                 }
                 AppEvent::Error(msg) => {
@@ -183,10 +204,31 @@ impl eframe::App for MyApp {
             ui.heading("Playground");
             ui.label("Drag and drop panels here.");
 
+            ui.separator();
+            ui.heading("Active Transfers");
+            if self.active_transfers.is_empty() {
+                ui.label("No active transfers.");
+            } else {
+                for transfer in self.active_transfers.values() {
+                    ui.group(|ui| {
+                        let direction = if transfer.is_sending {
+                            "Sending"
+                        } else {
+                            "Receiving"
+                        };
+                        ui.label(format!(
+                            "{} {}: {}",
+                            direction, transfer.file_name, transfer.speed
+                        ));
+                        ui.add(egui::ProgressBar::new(transfer.progress / 100.0).show_percentage());
+                    });
+                }
+            }
+
             // Show status logs
             ui.separator();
             egui::ScrollArea::vertical()
-                .max_height(100.0)
+                .max_height(200.0) // Increased height
                 .show(ui, |ui| {
                     for log in &self.status_log {
                         ui.label(log);

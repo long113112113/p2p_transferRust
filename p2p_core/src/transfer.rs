@@ -432,6 +432,7 @@ async fn receive_file(
     let mut received: u64 = 0;
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let total = file_info.file_size;
+    let start_time = std::time::Instant::now();
 
     let _ = event_tx
         .send(AppEvent::Status(format!(
@@ -458,12 +459,23 @@ async fn receive_file(
         // Report progress (less frequent to avoid log spam)
         if received == total || received % (BUFFER_SIZE as u64 * 10) == 0 {
             let progress = (received as f32 / total as f32) * 100.0;
-            let speed = format!("{:.1} KB/s", (received as f64 / 1024.0)); // Simplified
+            let elapsed = start_time.elapsed().as_secs_f64();
+            let speed_bps = if elapsed > 0.0 {
+                received as f64 / elapsed
+            } else {
+                0.0
+            };
+            let speed = if speed_bps > 1_000_000.0 {
+                format!("{:.2} MB/s", speed_bps / 1_000_000.0)
+            } else {
+                format!("{:.1} KB/s", speed_bps / 1_000.0)
+            };
             let _ = event_tx
                 .send(AppEvent::TransferProgress {
                     file_name: file_info.file_name.clone(),
                     progress,
                     speed,
+                    is_sending: false,
                 })
                 .await;
         }
@@ -733,6 +745,7 @@ async fn send_single_file(
     // 2. Send file data
     let mut sent: u64 = 0;
     let mut buffer = vec![0u8; BUFFER_SIZE];
+    let start_time = std::time::Instant::now();
 
     let _ = event_tx
         .send(AppEvent::Status(format!(
@@ -758,12 +771,23 @@ async fn send_single_file(
         // Report progress (less frequent)
         if sent == file_size || sent % (BUFFER_SIZE as u64 * 10) == 0 {
             let progress = (sent as f32 / file_size as f32) * 100.0;
-            let speed = format!("{:.1} KB/s", (sent as f64 / 1024.0)); // Simplified
+            let elapsed = start_time.elapsed().as_secs_f64();
+            let speed_bps = if elapsed > 0.0 {
+                sent as f64 / elapsed
+            } else {
+                0.0
+            };
+            let speed = if speed_bps > 1_000_000.0 {
+                format!("{:.2} MB/s", speed_bps / 1_000_000.0)
+            } else {
+                format!("{:.1} KB/s", speed_bps / 1_000.0)
+            };
             let _ = event_tx
                 .send(AppEvent::TransferProgress {
                     file_name: file_name.clone(),
                     progress,
                     speed,
+                    is_sending: true,
                 })
                 .await;
         }

@@ -73,6 +73,7 @@ pub enum AppEvent {
         file_name: String,
         progress: f32,
         speed: String,
+        is_sending: bool,
     },
     TransferCompleted(String),
     Error(String),
