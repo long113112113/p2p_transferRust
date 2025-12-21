@@ -174,10 +174,7 @@ impl eframe::App for MyApp {
                             verification_status: None,
                         },
                     );
-                    self.status_log.push(format!(
-                        "[Transfer] {} - {:.1}% @ {}",
-                        file_name, progress, speed
-                    ));
+                    // Progress already shown in progress bar, no need to log
                 }
                 AppEvent::TransferCompleted(file_name) => {
                     self.status_log
