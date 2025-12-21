@@ -21,6 +21,8 @@ pub enum TransferMsg {
     FileMetadata { info: FileInfo },
     /// Ready to receive file data
     ReadyForData,
+    /// Resume transfer from offset
+    ResumeInfo { offset: u64 },
 }
 
 /// Send a protocol message over a bidirectional stream

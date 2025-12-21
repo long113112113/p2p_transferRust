@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use super::constants::BUFFER_SIZE;
@@ -259,16 +259,16 @@ async fn send_single_file(
         )))
         .await;
 
-    // Open uni-directional stream
+    // Open bi-directional stream
     let _ = event_tx
         .send(AppEvent::Status(
-            "[DEBUG] Opening uni-directional stream...".to_string(),
+            "[DEBUG] Opening bi-directional stream...".to_string(),
         ))
         .await;
-    let mut send_stream = connection.open_uni().await?;
+    let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
     let _ = event_tx
         .send(AppEvent::Status(
-            "[DEBUG] Uni-directional stream opened.".to_string(),
+            "[DEBUG] Bi-directional stream opened.".to_string(),
         ))
         .await;
 
@@ -279,34 +279,48 @@ async fn send_single_file(
         file_path: PathBuf::new(), // Not needed for transfer
         file_hash: Some(file_hash.clone()),
     };
-    let meta_json = serde_json::to_vec(&file_info)?;
-    let meta_len = (meta_json.len() as u32).to_be_bytes();
 
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] Sending metadata: {} bytes",
-            meta_json.len()
-        )))
-        .await;
-
-    send_stream.write_all(&meta_len).await?;
-    send_stream.write_all(&meta_json).await?;
+    // Wrap in TransferMsg
+    send_msg(
+        &mut send_stream,
+        &TransferMsg::FileMetadata { info: file_info },
+    )
+    .await?;
 
     let _ = event_tx
         .send(AppEvent::Status(
-            "[DEBUG] Metadata sent successfully.".to_string(),
+            "[DEBUG] Metadata sent successfully. Waiting for resume info...".to_string(),
         ))
         .await;
 
-    // 2. Send file data
-    let mut sent: u64 = 0;
+    // 2. Wait for Resume Info
+    let msg = recv_msg(&mut recv_stream).await?;
+    let offset = match msg {
+        TransferMsg::ResumeInfo { offset } => offset,
+        _ => return Err(anyhow!("Expected ResumeInfo, got {:?}", msg)),
+    };
+
+    if offset > 0 {
+        let _ = event_tx
+            .send(AppEvent::Status(format!(
+                "[DEBUG] Resuming transfer from offset {}",
+                offset
+            )))
+            .await;
+        use std::io::SeekFrom;
+        file.seek(SeekFrom::Start(offset)).await?;
+    }
+
+    // 3. Send file data
+    let mut sent: u64 = offset;
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let start_time = std::time::Instant::now();
 
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "[DEBUG] Starting to send file data: {} bytes",
-            file_size
+            "[DEBUG] Starting to send file data from offset {}: {} bytes remaining",
+            offset,
+            file_size - offset
         )))
         .await;
 
@@ -329,7 +343,7 @@ async fn send_single_file(
             let progress = (sent as f32 / file_size as f32) * 100.0;
             let elapsed = start_time.elapsed().as_secs_f64();
             let speed_bps = if elapsed > 0.0 {
-                sent as f64 / elapsed
+                (sent - offset) as f64 / elapsed
             } else {
                 0.0
             };

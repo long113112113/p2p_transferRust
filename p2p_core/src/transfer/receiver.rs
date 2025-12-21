@@ -10,40 +10,12 @@ use super::hash::compute_file_hash;
 
 /// Receive a single file from the stream
 pub async fn receive_file(
-    stream: &mut quinn::RecvStream,
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
     download_dir: &PathBuf,
     event_tx: &mpsc::Sender<AppEvent>,
+    file_info: FileInfo,
 ) -> Result<()> {
-    let _ = event_tx
-        .send(AppEvent::Status(
-            "[DEBUG] receive_file: Starting to read metadata length...".to_string(),
-        ))
-        .await;
-
-    // 1. Read metadata length (4 bytes, big-endian)
-    let mut len_buf = [0u8; 4];
-    stream.read_exact(&mut len_buf).await?;
-    let meta_len = u32::from_be_bytes(len_buf) as usize;
-
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] receive_file: Metadata length = {} bytes",
-            meta_len
-        )))
-        .await;
-
-    // 2. Read metadata JSON
-    let mut meta_buf = vec![0u8; meta_len];
-    stream.read_exact(&mut meta_buf).await?;
-    let file_info: FileInfo = serde_json::from_slice(&meta_buf)?;
-
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] receive_file: FileInfo parsed - name: {}, size: {}",
-            file_info.file_name, file_info.file_size
-        )))
-        .await;
-
     let _ = event_tx
         .send(AppEvent::Status(format!(
             "Receiving: {} ({} bytes)",
@@ -51,46 +23,69 @@ pub async fn receive_file(
         )))
         .await;
 
-    // 3. Create download directory if needed
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] receive_file: Creating dir {:?}",
-            download_dir
-        )))
-        .await;
+    // 1. Create download directory if needed
     tokio::fs::create_dir_all(download_dir).await?;
-
-    // 4. Create file
     let file_path = download_dir.join(&file_info.file_name);
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] receive_file: Creating file {:?}",
-            file_path
-        )))
-        .await;
-    let mut file = File::create(&file_path).await?;
-    let _ = event_tx
-        .send(AppEvent::Status(
-            "[DEBUG] receive_file: File created successfully".to_string(),
-        ))
-        .await;
+
+    // 2. Check for partial file to resume
+    let mut offset = 0;
+    if file_path.exists() {
+        let metadata = tokio::fs::metadata(&file_path).await?;
+        let current_size = metadata.len();
+        if current_size < file_info.file_size {
+            offset = current_size;
+            let _ = event_tx
+                .send(AppEvent::Status(format!(
+                    "[DEBUG] Found partial file. Resuming from {} bytes",
+                    offset
+                )))
+                .await;
+        } else {
+            // File already present and size >= remote.
+            // For now, let's just overwrite (offset 0) to ensure integrity,
+            // OR we could check hash if we fully implemented that.
+            // Let's overwrite for safety unless we do advanced checking.
+            let _ = event_tx
+                .send(AppEvent::Status(format!(
+                    "[DEBUG] File exists with size {} >= {}. Overwriting...",
+                    current_size, file_info.file_size
+                )))
+                .await;
+            offset = 0;
+        }
+    }
+
+    // 3. Send Resume Info
+    use super::protocol::{TransferMsg, send_msg};
+    send_msg(send, &TransferMsg::ResumeInfo { offset }).await?;
+
+    // 4. Open file
+    let mut file = if offset > 0 {
+        tokio::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(&file_path)
+            .await?
+    } else {
+        File::create(&file_path).await?
+    };
 
     // 5. Receive file data
-    let mut received: u64 = 0;
+    let mut received: u64 = offset;
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let total = file_info.file_size;
     let start_time = std::time::Instant::now();
 
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "[DEBUG] receive_file: Starting to receive {} bytes...",
-            total
+            "[DEBUG] receive_file: Starting to receive remaining {} bytes...",
+            total - received
         )))
         .await;
 
     while received < total {
         let to_read = std::cmp::min(BUFFER_SIZE as u64, total - received) as usize;
-        let n = stream.read(&mut buffer[..to_read]).await?.unwrap_or(0);
+        let n = recv.read(&mut buffer[..to_read]).await?.unwrap_or(0);
         if n == 0 {
             let _ = event_tx
                 .send(AppEvent::Status(format!(

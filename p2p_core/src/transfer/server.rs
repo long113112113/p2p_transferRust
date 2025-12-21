@@ -32,67 +32,89 @@ pub async fn run_server(
             match incoming.await {
                 Ok(connection) => {
                     let remote_addr = connection.remote_address();
-                    // Accept the bidirectional stream for handshake
-                    match connection.accept_bi().await {
-                        Ok((mut send_stream, mut recv_stream)) => {
-                            if let Err(e) = handle_verification_handshake(
-                                &mut send_stream,
-                                &mut recv_stream,
-                                &event_tx,
-                                remote_addr,
-                            )
-                            .await
-                            {
-                                let _ = event_tx
-                                    .send(AppEvent::Error(format!(
-                                        "Verification error ({}): {}",
-                                        remote_addr, e
-                                    )))
-                                    .await;
-                                return; // Stop if handshake fails
-                            }
-                        }
-                        Err(e) => {
-                            let _ = event_tx
-                                .send(AppEvent::Error(format!(
-                                    "Cannot open verification channel ({}): {}",
-                                    remote_addr, e
-                                )))
-                                .await;
-                            return;
-                        }
-                    }
 
-                    // Handshake success, now accept file streams
+                    // We now use bidirectional streams for EVERYTHING (Handshake AND File Transfer)
+                    // The first message determines the type of operation.
+
                     let _ = event_tx
                         .send(AppEvent::Status(format!(
-                            "Connected and verified: {}",
+                            "[DEBUG] Connected: {}. Waiting for streams...",
                             remote_addr
                         )))
                         .await;
 
-                    // Accept uni-directional stream for file data
-                    let _ = event_tx
-                        .send(AppEvent::Status(
-                            "[DEBUG] Waiting for file streams...".to_string(),
-                        ))
-                        .await;
-                    while let Ok(mut recv_stream) = connection.accept_uni().await {
-                        let _ = event_tx
-                            .send(AppEvent::Status(
-                                "[DEBUG] New file stream accepted.".to_string(),
-                            ))
-                            .await;
+                    while let Ok((mut send_stream, mut recv_stream)) = connection.accept_bi().await
+                    {
                         let event_tx = event_tx.clone();
                         let download_dir = download_dir.clone();
+                        let remote_addr = remote_addr;
 
                         tokio::spawn(async move {
-                            if let Err(e) =
-                                receive_file(&mut recv_stream, &download_dir, &event_tx).await
-                            {
-                                let _ = event_tx
-                                    .send(AppEvent::Error(format!("Receive file error: {}", e)))
-                                    .await;
+                            // Read first message to determine type
+                            match recv_msg(&mut recv_stream).await {
+                                Ok(msg) => {
+                                    match msg {
+                                        TransferMsg::PairingRequest { peer_id, peer_name } => {
+                                            // Handle Handshake
+                                            if let Err(e) = handle_verification_handshake(
+                                                &mut send_stream,
+                                                &mut recv_stream,
+                                                &event_tx,
+                                                remote_addr,
+                                                peer_id,
+                                                peer_name,
+                                            )
+                                            .await
+                                            {
+                                                let _ = event_tx
+                                                    .send(AppEvent::Error(format!(
+                                                        "Verification error ({}): {}",
+                                                        remote_addr, e
+                                                    )))
+                                                    .await;
+                                            }
+                                        }
+                                        TransferMsg::FileMetadata { info } => {
+                                            // Handle File Transfer
+                                            // Note: We already read the metadata message, so we pass it to receive_file
+                                            // OR we can reconstruct it, OR change receive_file signature.
+                                            // Let's change receive_file signature to accept the info and streams.
+
+                                            if let Err(e) = receive_file(
+                                                &mut send_stream,
+                                                &mut recv_stream,
+                                                &download_dir,
+                                                &event_tx,
+                                                info,
+                                            )
+                                            .await
+                                            {
+                                                let _ = event_tx
+                                                    .send(AppEvent::Error(format!(
+                                                        "Receive file error: {}",
+                                                        e
+                                                    )))
+                                                    .await;
+                                            }
+                                        }
+                                        _ => {
+                                            let _ = event_tx
+                                                .send(AppEvent::Error(format!(
+                                                    "Unexpected first message from {}: {:?}",
+                                                    remote_addr, msg
+                                                )))
+                                                .await;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = event_tx
+                                        .send(AppEvent::Error(format!(
+                                            "Error reading first message from {}: {}",
+                                            remote_addr, e
+                                        )))
+                                        .await;
+                                }
                             }
                         });
                     }
@@ -113,15 +135,12 @@ async fn handle_verification_handshake(
     recv: &mut quinn::RecvStream,
     event_tx: &mpsc::Sender<AppEvent>,
     remote_addr: SocketAddr,
+    peer_id: String,
+    peer_name: String,
 ) -> Result<()> {
-    // 1. Wait for PairingRequest
-    let msg = recv_msg(recv).await?;
-    let (peer_id, peer_name) = match msg {
-        TransferMsg::PairingRequest { peer_id, peer_name } => (peer_id, peer_name),
-        _ => return Err(anyhow!("Expected PairingRequest, got {:?}", msg)),
-    };
-
+    // 1. (Already received PairingRequest)
     // 2. Check if already paired
+
     if pairing::is_paired(&peer_id) {
         // Already paired -> Accept
         send_msg(send, &TransferMsg::PairingAccepted).await?;
