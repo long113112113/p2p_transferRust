@@ -1,4 +1,5 @@
 use eframe::egui;
+use egui_phosphor::regular::DESKTOP;
 use p2p_core::AppCommand;
 use tokio::sync::mpsc;
 
@@ -22,7 +23,7 @@ pub fn show(
             } else {
                 for peer in peers {
                     ui.horizontal(|ui| {
-                        ui.label("🖥");
+                        ui.label(DESKTOP);
                         ui.label(peer);
                         if ui.button("Send Files").clicked() {
                             let cmd_tx = cmd_tx.clone();

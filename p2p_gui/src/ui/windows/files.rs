@@ -1,4 +1,5 @@
 use eframe::egui;
+use egui_phosphor::regular::{ARROWS_CLOCKWISE, FILE_TEXT, TRASH};
 use std::path::PathBuf;
 
 pub fn show(
@@ -30,7 +31,7 @@ pub fn show(
             // 2. File List
             ui.horizontal(|ui| {
                 ui.label(format!("Files in directory ({}):", local_files.len()));
-                if ui.button("🔄 Refresh").clicked() {
+                if ui.button(format!("{} Refresh", ARROWS_CLOCKWISE)).clicked() {
                     should_refresh = true;
                 }
             });
@@ -43,8 +44,17 @@ pub fn show(
                 } else {
                     for file_name in local_files {
                         ui.horizontal(|ui| {
-                            ui.label("📄");
+                            ui.label(FILE_TEXT);
                             ui.label(file_name);
+
+                            // Delete button
+                            if ui.button(TRASH).on_hover_text("Delete file").clicked() {
+                                let file_path = download_path.join(file_name);
+                                if let Err(e) = std::fs::remove_file(&file_path) {
+                                    eprintln!("Failed to delete file: {}", e);
+                                }
+                                should_refresh = true;
+                            }
                         });
                     }
                 }
