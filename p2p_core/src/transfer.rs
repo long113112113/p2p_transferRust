@@ -24,8 +24,8 @@ use tokio::sync::mpsc;
 /// Default QUIC port for file transfer
 pub const TRANSFER_PORT: u16 = 9000;
 
-/// Buffer size for file transfer (64KB)
-const BUFFER_SIZE: usize = 64 * 1024;
+/// Buffer size for file transfer (1MB)
+const BUFFER_SIZE: usize = 1024 * 1024;
 
 /// Protocol messages for transfer handshake
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +96,13 @@ pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<Endpoint> {
     // Configure transport
     let mut transport_config = TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
+    transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
+    // Optimize for throughput
+    transport_config.stream_receive_window((10 * 1024 * 1024 as u32).into()); // 10 MiB
+    transport_config.receive_window((20 * 1024 * 1024 as u32).into()); // 20 MiB
+    transport_config.send_window(20 * 1024 * 1024);
+    transport_config.datagram_receive_buffer_size(Some(20 * 1024 * 1024));
+
     server_config.transport_config(Arc::new(transport_config));
 
     let endpoint = Endpoint::server(server_config, bind_addr)?;
@@ -119,6 +126,13 @@ pub fn make_client_endpoint() -> Result<Endpoint> {
     // Configure transport
     let mut transport_config = TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
+    transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
+    // Optimize for throughput
+    transport_config.stream_receive_window((10 * 1024 * 1024 as u32).into()); // 10 MiB
+    transport_config.receive_window((20 * 1024 * 1024 as u32).into()); // 20 MiB
+    transport_config.send_window(20 * 1024 * 1024);
+    transport_config.datagram_receive_buffer_size(Some(20 * 1024 * 1024));
+
     client_config.transport_config(Arc::new(transport_config));
 
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
@@ -553,29 +567,52 @@ pub async fn send_files(
             files.len()
         )))
         .await;
+
+    // Use a JoinSet or just a vector of handles to await all uploads
+    let mut handles = Vec::new();
+
     for (idx, file_path) in files.iter().enumerate() {
-        let _ = event_tx
-            .send(AppEvent::Status(format!(
-                "[DEBUG] Sending file {}/{}: {}",
-                idx + 1,
-                files.len(),
-                file_path.display()
-            )))
-            .await;
-        if let Err(e) = send_single_file(&connection, file_path, &event_tx).await {
-            let _ = event_tx
-                .send(AppEvent::Error(format!(
-                    "Error sending {}: {}",
-                    file_path.display(),
-                    e
-                )))
-                .await;
-        } else {
+        let connection = connection.clone();
+        let file_path = file_path.clone(); // Clone PathBuf
+        let event_tx = event_tx.clone();
+        let idx = idx;
+        let total_files = files.len();
+
+        let handle = tokio::spawn(async move {
             let _ = event_tx
                 .send(AppEvent::Status(format!(
-                    "[DEBUG] File sent successfully: {}",
+                    "[DEBUG] Sending file {}/{}: {}",
+                    idx + 1,
+                    total_files,
                     file_path.display()
                 )))
+                .await;
+
+            if let Err(e) = send_single_file(&connection, &file_path, &event_tx).await {
+                let _ = event_tx
+                    .send(AppEvent::Error(format!(
+                        "Error sending {}: {}",
+                        file_path.display(),
+                        e
+                    )))
+                    .await;
+            } else {
+                let _ = event_tx
+                    .send(AppEvent::Status(format!(
+                        "[DEBUG] File sent successfully: {}",
+                        file_path.display()
+                    )))
+                    .await;
+            }
+        });
+        handles.push(handle);
+    }
+
+    // Wait for all transfers to complete
+    for handle in handles {
+        if let Err(e) = handle.await {
+            let _ = event_tx
+                .send(AppEvent::Error(format!("Task join error: {}", e)))
                 .await;
         }
     }
