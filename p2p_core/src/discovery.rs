@@ -4,6 +4,27 @@ use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+/// Default UDP port for peer discovery
+pub const DISCOVERY_PORT: u16 = 8888;
+
+/// Buffer size for receiving discovery packets
+const DISCOVERY_BUFFER_SIZE: usize = 2048;
+
+/// Broadcast address for LAN discovery
+const BROADCAST_ADDR: &str = "255.255.255.255";
+
+/// Interval between automatic discovery broadcasts (seconds)
+pub const DISCOVERY_INTERVAL_SECS: u64 = 5;
+
+/// Build a discovery packet with magic bytes prefix
+fn build_packet(msg: &DiscoveryMsg) -> Option<Vec<u8>> {
+    serde_json::to_vec(msg).ok().map(|json_bytes| {
+        let mut packet = MAGIC_BYTES.to_vec();
+        packet.extend_from_slice(&json_bytes);
+        packet
+    })
+}
+
 pub struct DiscoveryService {
     socket: Arc<UdpSocket>,
 }
@@ -29,13 +50,8 @@ impl DiscoveryService {
             my_name,
             port,
         };
-        if let Ok(json_bytes) = serde_json::to_vec(&msg) {
-            // Add identify bytes
-            let mut packet = MAGIC_BYTES.to_vec();
-            packet.extend_from_slice(&json_bytes);
-
-            // Broadcast to 255.255.255.255
-            let broadcast_addr = "255.255.255.255:8888";
+        if let Some(packet) = build_packet(&msg) {
+            let broadcast_addr = format!("{}:{}", BROADCAST_ADDR, DISCOVERY_PORT);
             let _ = self.socket.send_to(&packet, broadcast_addr).await;
         }
     }
@@ -53,11 +69,7 @@ impl DiscoveryService {
             my_name,
             port,
         };
-        if let Ok(json_bytes) = serde_json::to_vec(&msg) {
-            // Add identify bytes
-            let mut packet = MAGIC_BYTES.to_vec();
-            packet.extend_from_slice(&json_bytes);
-
+        if let Some(packet) = build_packet(&msg) {
             let _ = self.socket.send_to(&packet, target).await;
         }
     }
@@ -73,7 +85,7 @@ impl DiscoveryService {
         let socket = self.socket.clone();
 
         tokio::spawn(async move {
-            let mut buf = [0u8; 2048]; // Increased buffer for magic bytes + json
+            let mut buf = [0u8; DISCOVERY_BUFFER_SIZE];
             loop {
                 match socket.recv_from(&mut buf).await {
                     Ok((len, addr)) => {
@@ -100,9 +112,7 @@ impl DiscoveryService {
                                             my_name: my_name.clone(),
                                             port: my_port,
                                         };
-                                        if let Ok(json_bytes) = serde_json::to_vec(&response_msg) {
-                                            let mut packet = MAGIC_BYTES.to_vec();
-                                            packet.extend_from_slice(&json_bytes);
+                                        if let Some(packet) = build_packet(&response_msg) {
                                             let _ = socket.send_to(&packet, addr).await;
                                         }
 

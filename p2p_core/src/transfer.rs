@@ -504,7 +504,7 @@ pub async fn send_files(
         .await;
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "Đang kết nối tới: {} ({})",
+            "Connecting to: {} ({})",
             target_peer_name, target_addr
         )))
         .await;
@@ -601,7 +601,7 @@ async fn perform_verification_handshake(
                 .send(AppEvent::PairingResult {
                     success: true,
                     peer_name: target_peer_name,
-                    message: "Đã ghép đôi từ trước.".to_string(),
+                    message: "Already paired.".to_string(),
                 })
                 .await;
             Ok(())

@@ -6,6 +6,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
+/// Timeout for peer discovery - peers not seen within this time are pruned
+const PEER_TIMEOUT_SECS: u64 = 12;
+
 pub struct AppUIState {
     pub show_devices: bool,
     pub show_files: bool,
@@ -158,11 +161,11 @@ impl eframe::App for MyApp {
             }
         }
 
-        // 2. Prune offline peers (older than 12 seconds)
-        // Since backend broadcasts every 5s, 12s allows missing 2 packets.
+        // 2. Prune offline peers - peers not seen within timeout are removed
         let now = Instant::now();
-        self.peers
-            .retain(|_, info| now.duration_since(info.last_seen) < Duration::from_secs(12));
+        self.peers.retain(|_, info| {
+            now.duration_since(info.last_seen) < Duration::from_secs(PEER_TIMEOUT_SECS)
+        });
 
         // Prepare peer list for UI
         let mut peer_list: Vec<String> = self

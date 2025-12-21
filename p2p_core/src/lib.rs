@@ -11,7 +11,7 @@ pub mod discovery;
 pub mod pairing;
 pub mod transfer;
 
-use discovery::DiscoveryService;
+use discovery::{DISCOVERY_INTERVAL_SECS, DISCOVERY_PORT, DiscoveryService};
 use transfer::{TRANSFER_PORT, make_client_endpoint, make_server_endpoint};
 
 /// Magic bytes to identify our app's packets (6 bytes: "P2PLT\0")
@@ -97,14 +97,6 @@ pub enum AppEvent {
     },
 }
 
-/// Get download directory
-fn get_download_dir() -> PathBuf {
-    directories::UserDirs::new()
-        .and_then(|dirs| dirs.download_dir().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("p2p_transfer")
-}
-
 /// New Thread
 /// cmd_rx: listent from GUI
 /// event_tx: send to GUI
@@ -119,8 +111,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // Store pending verification channels (IP -> Sender)
     let mut verification_pending: HashMap<String, oneshot::Sender<String>> = HashMap::new();
 
-    // 2. Setup Ports
-    let discovery_port = 8888;
+    // 2. Setup Ports - use constants from discovery module
 
     // Send message to GUI
     let _ = event_tx.send(AppEvent::Status(format!(
@@ -129,12 +120,12 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     )));
 
     // 3. Init Discovery Service
-    let discovery_service = match DiscoveryService::new(discovery_port).await {
+    let discovery_service = match DiscoveryService::new(DISCOVERY_PORT).await {
         Ok(ds) => Arc::new(ds),
         Err(e) => {
             let _ = event_tx.send(AppEvent::Error(format!(
                 "Cant bind port {}: {}",
-                discovery_port, e
+                DISCOVERY_PORT, e
             )));
             return;
         }
@@ -164,7 +155,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     };
 
     // 6. Start QUIC Server Loop
-    let download_dir = get_download_dir();
+    let download_dir = config::get_download_dir();
     let server_event_tx = event_tx.clone();
     tokio::spawn(async move {
         transfer::run_server(server_endpoint, server_event_tx, download_dir).await;
@@ -188,7 +179,8 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
             .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), TRANSFER_PORT)
             .await;
 
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(DISCOVERY_INTERVAL_SECS));
         loop {
             interval.tick().await;
             ds_clone
@@ -197,7 +189,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     });
 
-    // Vòng lặp chính: Chờ lệnh từ UI
+    // Main loop: Wait for commands from UI
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             AppCommand::StartDiscovery => {
