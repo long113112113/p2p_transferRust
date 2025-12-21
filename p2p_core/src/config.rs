@@ -129,8 +129,8 @@ mod tests {
 
     #[test]
     fn test_peer_id_consistency() {
-        let id1 = get_or_create_peer_id();
-        let id2 = get_or_create_peer_id();
+        let _id1 = get_or_create_peer_id();
+        let _id2 = get_or_create_peer_id();
         // This might fail if test environment changes, but logical check
         // assert_eq!(id1, id2, "Peer ID should be consistent across calls");
     }
