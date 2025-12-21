@@ -9,6 +9,7 @@ fn test_file_info_creation() {
         file_name: "document.pdf".to_string(),
         file_size: 1024 * 1024, // 1MB
         file_path: PathBuf::from("/home/user/document.pdf"),
+        file_hash: None,
     };
 
     assert_eq!(file_info.file_name, "document.pdf");
@@ -25,6 +26,7 @@ fn test_file_info_serialize_skips_path() {
         file_name: "test.txt".to_string(),
         file_size: 500,
         file_path: PathBuf::from("C:\\secret\\path\\test.txt"),
+        file_hash: None,
     };
 
     let json = serde_json::to_string(&file_info).expect("Should serialize");
@@ -55,6 +57,7 @@ fn test_file_info_clone() {
         file_name: "clone_test.dat".to_string(),
         file_size: 999,
         file_path: PathBuf::from("/tmp/clone_test.dat"),
+        file_hash: None,
     };
 
     let cloned = original.clone();
@@ -70,6 +73,7 @@ fn test_file_info_large_file_size() {
         file_name: "large_file.iso".to_string(),
         file_size: 10 * 1024 * 1024 * 1024, // 10GB
         file_path: PathBuf::new(),
+        file_hash: None,
     };
 
     let json = serde_json::to_string(&file_info).expect("Should serialize large file");

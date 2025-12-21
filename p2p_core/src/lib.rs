@@ -39,6 +39,9 @@ pub struct FileInfo {
     ///Skip file path when serializing
     #[serde(skip)]
     pub file_path: PathBuf,
+    /// BLAKE3 hash for integrity verification (64-character hex string)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_hash: Option<String>,
 }
 
 //Struct command from GUI to Core
@@ -95,6 +98,19 @@ pub enum AppEvent {
         success: bool,
         peer_name: String,
         message: String,
+    },
+
+    /// File verification started
+    VerificationStarted {
+        file_name: String,
+        is_sending: bool,
+    },
+
+    /// File verification completed
+    VerificationCompleted {
+        file_name: String,
+        is_sending: bool,
+        verified: bool,
     },
 }
 

@@ -29,11 +29,19 @@ struct PeerInfo {
     last_seen: Instant,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum VerificationStatus {
+    Verifying,
+    Verified,
+    Failed,
+}
+
 struct TransferState {
     file_name: String,
     progress: f32,
     speed: String,
     is_sending: bool,
+    verification_status: Option<VerificationStatus>,
 }
 
 pub struct MyApp {
@@ -163,6 +171,7 @@ impl eframe::App for MyApp {
                             progress,
                             speed: speed.clone(),
                             is_sending,
+                            verification_status: None,
                         },
                     );
                     self.status_log.push(format!(
@@ -178,6 +187,34 @@ impl eframe::App for MyApp {
                 }
                 AppEvent::Error(msg) => {
                     self.status_log.push(format!("[ERROR] {}", msg));
+                }
+                AppEvent::VerificationStarted {
+                    file_name,
+                    is_sending: _,
+                } => {
+                    if let Some(transfer) = self.active_transfers.get_mut(&file_name) {
+                        transfer.verification_status = Some(VerificationStatus::Verifying);
+                    }
+                }
+                AppEvent::VerificationCompleted {
+                    file_name,
+                    is_sending: _,
+                    verified,
+                } => {
+                    if let Some(transfer) = self.active_transfers.get_mut(&file_name) {
+                        transfer.verification_status = Some(if verified {
+                            VerificationStatus::Verified
+                        } else {
+                            VerificationStatus::Failed
+                        });
+                    }
+                    let status = if verified {
+                        "✓ Verified"
+                    } else {
+                        "✗ Corrupted"
+                    };
+                    self.status_log
+                        .push(format!("[Verification] {} - {}", file_name, status));
                 }
             }
         }
@@ -216,10 +253,33 @@ impl eframe::App for MyApp {
                         } else {
                             "Receiving"
                         };
-                        ui.label(format!(
-                            "{} {}: {}",
-                            direction, transfer.file_name, transfer.speed
-                        ));
+
+                        // Show verification status if available
+                        let verification_text = match transfer.verification_status {
+                            Some(VerificationStatus::Verifying) => " ⏳ Verifying...",
+                            Some(VerificationStatus::Verified) => " ✓ Verified",
+                            Some(VerificationStatus::Failed) => " ✗ Corrupted",
+                            None => "",
+                        };
+
+                        let label_text = format!(
+                            "{} {}: {}{}",
+                            direction, transfer.file_name, transfer.speed, verification_text
+                        );
+
+                        // Color code based on verification status
+                        match transfer.verification_status {
+                            Some(VerificationStatus::Verified) => {
+                                ui.colored_label(egui::Color32::GREEN, label_text);
+                            }
+                            Some(VerificationStatus::Failed) => {
+                                ui.colored_label(egui::Color32::RED, label_text);
+                            }
+                            _ => {
+                                ui.label(label_text);
+                            }
+                        }
+
                         ui.add(egui::ProgressBar::new(transfer.progress / 100.0).show_percentage());
                     });
                 }

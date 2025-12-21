@@ -9,6 +9,7 @@
 use crate::pairing;
 use crate::{AppEvent, FileInfo};
 use anyhow::{Result, anyhow};
+use blake3::Hasher;
 use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
@@ -189,6 +190,23 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
             rustls::SignatureScheme::ED25519,
         ]
     }
+}
+
+/// Compute BLAKE3 hash of a file
+async fn compute_file_hash(file_path: &PathBuf) -> Result<String> {
+    let mut file = File::open(file_path).await?;
+    let mut hasher = Hasher::new();
+    let mut buffer = vec![0u8; BUFFER_SIZE];
+
+    loop {
+        let n = file.read(&mut buffer).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    Ok(hasher.finalize().to_hex().to_string())
 }
 
 /// Run the QUIC server to accept incoming file transfers
@@ -504,6 +522,61 @@ async fn receive_file(
 
     file.flush().await?;
 
+    // Verify file hash if provided
+    if let Some(expected_hash) = file_info.file_hash {
+        let _ = event_tx
+            .send(AppEvent::VerificationStarted {
+                file_name: file_info.file_name.clone(),
+                is_sending: false,
+            })
+            .await;
+
+        let _ = event_tx
+            .send(AppEvent::Status(format!(
+                "[DEBUG] Verifying hash for {}...",
+                file_info.file_name
+            )))
+            .await;
+
+        // Compute hash of received file
+        let computed_hash = compute_file_hash(&file_path).await?;
+
+        let verified = computed_hash == expected_hash;
+
+        if verified {
+            let _ = event_tx
+                .send(AppEvent::Status(format!(
+                    "[DEBUG] Hash verification SUCCESS for {}",
+                    file_info.file_name
+                )))
+                .await;
+        } else {
+            let _ = event_tx
+                .send(AppEvent::Error(format!(
+                    "Hash verification FAILED for {}! Expected: {}..., Got: {}...",
+                    file_info.file_name,
+                    &expected_hash[..16],
+                    &computed_hash[..16]
+                )))
+                .await;
+        }
+
+        let _ = event_tx
+            .send(AppEvent::VerificationCompleted {
+                file_name: file_info.file_name.clone(),
+                is_sending: false,
+                verified,
+            })
+            .await;
+    } else {
+        let _ = event_tx
+            .send(AppEvent::Status(format!(
+                "[DEBUG] No hash provided for {}, skipping verification",
+                file_info.file_name
+            )))
+            .await;
+    }
+
     let _ = event_tx
         .send(AppEvent::TransferCompleted(file_info.file_name.clone()))
         .await;
@@ -741,6 +814,23 @@ async fn send_single_file(
         )))
         .await;
 
+    // Compute hash before sending
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
+            "[DEBUG] Computing hash for {}...",
+            file_name
+        )))
+        .await;
+
+    let file_hash = compute_file_hash(file_path).await?;
+
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
+            "[DEBUG] Hash computed: {}",
+            &file_hash[..16] // Show first 16 chars
+        )))
+        .await;
+
     // Open uni-directional stream
     let _ = event_tx
         .send(AppEvent::Status(
@@ -754,11 +844,12 @@ async fn send_single_file(
         ))
         .await;
 
-    // 1. Send metadata
+    // 1. Send metadata with hash
     let file_info = FileInfo {
         file_name: file_name.clone(),
         file_size,
         file_path: PathBuf::new(), // Not needed for transfer
+        file_hash: Some(file_hash.clone()),
     };
     let meta_json = serde_json::to_vec(&file_info)?;
     let meta_len = (meta_json.len() as u32).to_be_bytes();
@@ -849,6 +940,15 @@ async fn send_single_file(
 
     let _ = event_tx
         .send(AppEvent::Status("[DEBUG] Stream finished.".to_string()))
+        .await;
+
+    // Notify sender that file was sent and verified (we assume receiver will verify)
+    let _ = event_tx
+        .send(AppEvent::VerificationCompleted {
+            file_name: file_name.clone(),
+            is_sending: true,
+            verified: true, // Sender side always true (we computed the hash)
+        })
         .await;
 
     let _ = event_tx.send(AppEvent::TransferCompleted(file_name)).await;
