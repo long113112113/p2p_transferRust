@@ -2,7 +2,7 @@ use crate::{AppEvent, FileInfo};
 use anyhow::Result;
 use std::path::PathBuf;
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
 use super::constants::BUFFER_SIZE;

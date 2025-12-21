@@ -6,8 +6,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::constants::TRANSFER_PORT;
-
 /// Generate a self-signed certificate for QUIC
 pub fn generate_self_signed_cert()
 -> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>)> {
