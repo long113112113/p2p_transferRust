@@ -54,7 +54,7 @@ impl MyApp {
             verification_state: VerificationState::default(),
             status_log: Vec::new(),
             peers: HashMap::new(),
-            download_path: p2p_core::config::AppConfig::load().download_path,
+            download_path: p2p_core::config::get_download_dir(),
             local_files: Vec::new(),
         };
         app.refresh_local_files();

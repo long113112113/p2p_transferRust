@@ -27,17 +27,20 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
-        // Fixed download path: ~/p2p_transfer (works on both Windows and Linux)
-        let download_path = directories::UserDirs::new()
-            .map(|dirs| dirs.home_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("p2p_transfer");
-
         Self {
             pairing: HashMap::new(),
-            download_path,
+            download_path: get_download_dir(),
         }
     }
+}
+
+/// Get the fixed download directory: ~/p2p_transfer
+/// Works on both Windows and Linux
+pub fn get_download_dir() -> PathBuf {
+    directories::UserDirs::new()
+        .map(|dirs| dirs.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("p2p_transfer")
 }
 
 impl AppConfig {
