@@ -775,31 +775,17 @@ async fn send_single_file(
         .await;
     send_stream.finish()?;
 
-    // Wait for the receiver to acknowledge all data was received
-    // This prevents the connection from being dropped while receiver is still reading
+    // Wait a short time for data to be flushed
+    // We use a timeout instead of stopped().await because receiver might not send STOP_SENDING
     let _ = event_tx
         .send(AppEvent::Status(
-            "[DEBUG] Waiting for stream to close...".to_string(),
+            "[DEBUG] Waiting for data to flush (max 2s)...".to_string(),
         ))
         .await;
-    match send_stream.stopped().await {
-        Ok(_) => {
-            let _ = event_tx
-                .send(AppEvent::Status(
-                    "[DEBUG] Stream closed by receiver.".to_string(),
-                ))
-                .await;
-        }
-        Err(e) => {
-            // Ignore errors here - receiver might not send STOP_SENDING
-            let _ = event_tx
-                .send(AppEvent::Status(format!(
-                    "[DEBUG] Stream stopped with: {:?}",
-                    e
-                )))
-                .await;
-        }
-    }
+
+    // Use tokio timeout to avoid blocking forever
+    let _ = tokio::time::timeout(Duration::from_secs(2), send_stream.stopped()).await;
+
     let _ = event_tx
         .send(AppEvent::Status("[DEBUG] Stream finished.".to_string()))
         .await;
