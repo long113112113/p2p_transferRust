@@ -202,39 +202,19 @@ impl eframe::App for MyApp {
         }
 
         if self.ui_state.show_files {
-            // Clone for closure if needed, but here we can pass mutable references directly
-            // temporary closure to handle refresh
-            // We need to mutate self.local_files, so we can't borrow self immutably for 'files' AND mutably for 'refresh' callback easily if specific structure isn't split.
-            // Simplification: trigger refresh flag.
-
-            // Refactor: We can't pass a closure that borrows 'self' while 'self' is already borrowed.
-            // We will handle refresh logic *after* the UI call if a flag is returned, or imply it from state change.
-            // For now, let's just re-scan if needed.
-
-            // Actually, simplest way in immediate mode:
-            // Files panel takes &mut PathBuf and &Vec<String>.
-            // If path changes, we detect it here.
-
-            let current_path = self.download_path.clone(); // Clone to detect change
             let mut trigger_refresh = false;
 
             ui::windows::files::show(
                 ctx,
                 &mut self.ui_state.show_files,
-                &mut self.download_path,
+                &self.download_path,
                 &self.local_files,
                 || {
                     trigger_refresh = true;
                 },
             );
 
-            if self.download_path != current_path || trigger_refresh {
-                if self.download_path != current_path {
-                    // Save config if path changed
-                    let mut config = p2p_core::config::AppConfig::load();
-                    config.download_path = self.download_path.clone();
-                    config.save();
-                }
+            if trigger_refresh {
                 self.refresh_local_files();
             }
         }

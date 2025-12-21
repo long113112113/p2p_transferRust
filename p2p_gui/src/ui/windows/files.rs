@@ -4,11 +4,11 @@ use std::path::PathBuf;
 pub fn show(
     ctx: &egui::Context,
     open: &mut bool,
-    download_path: &mut PathBuf,
+    download_path: &PathBuf,
     local_files: &[String],
     refresh_files: impl FnOnce(),
 ) {
-    let mut location_changed = false;
+    let mut should_refresh = false;
 
     egui::Window::new("Files")
         .open(open)
@@ -19,15 +19,9 @@ pub fn show(
             ui.heading("File Management");
             ui.add_space(5.0);
 
-            // 1. Download Location Selector
+            // 1. Show fixed download location (read-only)
             ui.horizontal(|ui| {
                 ui.label("Save location:");
-                if ui.button("Browse...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                        *download_path = path;
-                        location_changed = true;
-                    }
-                }
             });
             ui.monospace(download_path.to_string_lossy());
 
@@ -37,7 +31,7 @@ pub fn show(
             ui.horizontal(|ui| {
                 ui.label(format!("Files in directory ({}):", local_files.len()));
                 if ui.button("🔄 Refresh").clicked() {
-                    location_changed = true; // Trigger refresh
+                    should_refresh = true;
                 }
             });
 
@@ -56,7 +50,7 @@ pub fn show(
                 }
             });
 
-            if location_changed {
+            if should_refresh {
                 refresh_files();
             }
         });
