@@ -29,15 +29,15 @@ pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<Endpoint> {
         quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)?,
     ));
 
-    // Configure transport
+    // Configure transport for high-speed LAN transfers
     let mut transport_config = TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
     transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
-    // Optimize for throughput
-    transport_config.stream_receive_window((10 * 1024 * 1024 as u32).into()); // 10 MiB
-    transport_config.receive_window((20 * 1024 * 1024 as u32).into()); // 20 MiB
-    transport_config.send_window(20 * 1024 * 1024);
-    transport_config.datagram_receive_buffer_size(Some(20 * 1024 * 1024));
+    // Optimized for 16MB buffer size
+    transport_config.stream_receive_window((64 * 1024 * 1024_u32).into()); // 64 MiB (4x buffer)
+    transport_config.receive_window((128 * 1024 * 1024_u32).into()); // 128 MiB (8x buffer)
+    transport_config.send_window(128 * 1024 * 1024); // 128 MiB
+    transport_config.datagram_receive_buffer_size(Some(64 * 1024 * 1024));
 
     server_config.transport_config(Arc::new(transport_config));
 
@@ -59,15 +59,15 @@ pub fn make_client_endpoint() -> Result<Endpoint> {
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?,
     ));
 
-    // Configure transport
+    // Configure transport for high-speed LAN transfers
     let mut transport_config = TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
     transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
-    // Optimize for throughput
-    transport_config.stream_receive_window((10 * 1024 * 1024 as u32).into()); // 10 MiB
-    transport_config.receive_window((20 * 1024 * 1024 as u32).into()); // 20 MiB
-    transport_config.send_window(20 * 1024 * 1024);
-    transport_config.datagram_receive_buffer_size(Some(20 * 1024 * 1024));
+    // Optimized for 16MB buffer size
+    transport_config.stream_receive_window((64 * 1024 * 1024_u32).into()); // 64 MiB (4x buffer)
+    transport_config.receive_window((128 * 1024 * 1024_u32).into()); // 128 MiB (8x buffer)
+    transport_config.send_window(128 * 1024 * 1024); // 128 MiB
+    transport_config.datagram_receive_buffer_size(Some(64 * 1024 * 1024));
 
     client_config.transport_config(Arc::new(transport_config));
 

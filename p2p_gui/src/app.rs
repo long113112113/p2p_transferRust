@@ -4,6 +4,7 @@ use eframe::egui;
 use p2p_core::{AppCommand, AppEvent};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 use tokio::sync::mpsc;
 
 /// Timeout for peer discovery - peers not seen within this time are pruned
@@ -77,6 +78,10 @@ pub struct MyApp {
     download_path: std::path::PathBuf,
     local_files: Vec<String>,
     active_transfers: HashMap<String, TransferState>,
+
+    // System Metrics
+    system: System,
+    last_metrics_update: Instant,
 }
 
 impl MyApp {
@@ -91,6 +96,12 @@ impl MyApp {
             download_path: p2p_core::config::get_download_dir(),
             local_files: Vec::new(),
             active_transfers: HashMap::new(),
+            system: System::new_with_specifics(
+                RefreshKind::nothing()
+                    .with_cpu(CpuRefreshKind::everything())
+                    .with_memory(MemoryRefreshKind::everything()),
+            ),
+            last_metrics_update: Instant::now(),
         };
         app.refresh_local_files();
         app
@@ -276,6 +287,39 @@ impl eframe::App for MyApp {
             now.duration_since(info.last_seen) < Duration::from_secs(PEER_TIMEOUT_SECS)
         });
 
+        // 3. Update Metrics (every 1 second)
+        if now.duration_since(self.last_metrics_update) > Duration::from_secs(1) {
+            self.system.refresh_cpu_all();
+            self.system.refresh_memory();
+            self.last_metrics_update = now;
+        }
+
+        // Calculate Bandwidth
+        let mut total_upload = 0.0;
+        let mut total_download = 0.0;
+
+        for transfer in self.active_transfers.values() {
+            // Parse speed string (e.g., "1.5 MB/s")
+            // This is a rough estimation based on the string format from p2p_core
+            let parts: Vec<&str> = transfer.speed.split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let Ok(val) = parts[0].parse::<f32>() {
+                    let mpbs = match parts[1] {
+                        "MB/s" => val,
+                        "KB/s" => val / 1024.0,
+                        "B/s" => val / 1024.0 / 1024.0,
+                        _ => 0.0,
+                    };
+
+                    if transfer.is_sending {
+                        total_upload += mpbs;
+                    } else {
+                        total_download += mpbs;
+                    }
+                }
+            }
+        }
+
         // Prepare peer list for UI
         let mut peer_list: Vec<String> = self
             .peers
@@ -355,7 +399,36 @@ impl eframe::App for MyApp {
                 });
         });
 
-        // 5. Draw Floating Windows
+        // 5. Draw Bottom Status Bar (System Metrics)
+        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // CPU
+                let cpu_usage = self.system.global_cpu_usage();
+                ui.label(format!("CPU: {:.1}%", cpu_usage));
+                ui.add(egui::ProgressBar::new(cpu_usage / 100.0).desired_width(100.0));
+
+                ui.separator();
+
+                // RAM
+                let used_mem = self.system.used_memory() as f32 / 1024.0 / 1024.0 / 1024.0; // GB
+                let total_mem = self.system.total_memory() as f32 / 1024.0 / 1024.0 / 1024.0; // GB
+                let mem_ratio = if total_mem > 0.0 {
+                    used_mem / total_mem
+                } else {
+                    0.0
+                };
+                ui.label(format!("RAM: {:.1}/{:.1} GB", used_mem, total_mem));
+                ui.add(egui::ProgressBar::new(mem_ratio).desired_width(100.0));
+
+                ui.separator();
+
+                // Bandwidth
+                ui.label(format!("↑ Upload: {:.2} MB/s", total_upload));
+                ui.label(format!("↓ Download: {:.2} MB/s", total_download));
+            });
+        });
+
+        // 6. Draw Floating Windows
         if self.ui_state.show_devices {
             ui::windows::devices::show(
                 ctx,
@@ -383,7 +456,7 @@ impl eframe::App for MyApp {
             }
         }
 
-        // 6. Draw Verification Windows
+        // 7. Draw Verification Windows
         verify::show_verification_windows(ctx, &mut self.verification_state, &self.cmd_sender);
 
         // Request repaint periodically to poll for new events from backend
