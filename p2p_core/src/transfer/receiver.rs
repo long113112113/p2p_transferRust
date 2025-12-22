@@ -84,6 +84,10 @@ pub async fn receive_file(
         .await;
 
     while received < total {
+        // Note: Pause/resume is controlled by the sender via protocol messages
+        // When sender pauses, it stops sending data, receiver naturally waits
+        // The sender sends PauseRequest/ResumeRequest which we acknowledge
+
         let to_read = std::cmp::min(BUFFER_SIZE as u64, total - received) as usize;
         let n = recv.read(&mut buffer[..to_read]).await?.unwrap_or(0);
         if n == 0 {

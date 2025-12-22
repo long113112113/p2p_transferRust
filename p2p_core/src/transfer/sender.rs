@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc;
 
 use super::constants::BUFFER_SIZE;
@@ -13,6 +13,7 @@ use super::hash::compute_file_hash;
 use super::protocol::{TransferMsg, recv_msg, send_msg};
 
 /// Send files to a remote peer
+/// Returns a HashMap of file_name -> control channel sender
 pub async fn send_files(
     endpoint: &Endpoint,
     target_addr: SocketAddr,
@@ -22,7 +23,7 @@ pub async fn send_files(
     my_name: String,
     target_peer_name: String,
     input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
-) -> Result<()> {
+) -> Result<std::collections::HashMap<String, mpsc::Sender<crate::TransferControl>>> {
     let _ = event_tx
         .send(AppEvent::Status(format!(
             "[DEBUG] send_files called. Target: {}, Files: {:?}",
@@ -69,7 +70,9 @@ pub async fn send_files(
         )))
         .await;
 
-    // Use a JoinSet or just a vector of handles to await all uploads
+    // Create control channels for each file
+    use std::collections::HashMap;
+    let mut control_channels = HashMap::new();
     let mut handles = Vec::new();
 
     for (idx, file_path) in files.iter().enumerate() {
@@ -78,6 +81,17 @@ pub async fn send_files(
         let event_tx = event_tx.clone();
         let idx = idx;
         let total_files = files.len();
+
+        // Get file name for control channel key
+        let file_name = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        // Create control channel for this transfer
+        let (control_tx, control_rx) = mpsc::channel(10);
+        control_channels.insert(file_name.clone(), control_tx);
 
         let handle = tokio::spawn(async move {
             let _ = event_tx
@@ -89,7 +103,7 @@ pub async fn send_files(
                 )))
                 .await;
 
-            if let Err(e) = send_single_file(&connection, &file_path, &event_tx).await {
+            if let Err(e) = send_single_file(&connection, &file_path, &event_tx, control_rx).await {
                 let _ = event_tx
                     .send(AppEvent::Error(format!(
                         "Error sending {}: {}",
@@ -118,7 +132,7 @@ pub async fn send_files(
         }
     }
 
-    Ok(())
+    Ok(control_channels)
 }
 
 /// Perform verification handshake on sender side
@@ -217,6 +231,7 @@ async fn send_single_file(
     connection: &quinn::Connection,
     file_path: &PathBuf,
     event_tx: &mpsc::Sender<AppEvent>,
+    mut control_rx: mpsc::Receiver<crate::TransferControl>,
 ) -> Result<()> {
     let _ = event_tx
         .send(AppEvent::Status(format!(
@@ -325,6 +340,64 @@ async fn send_single_file(
         .await;
 
     loop {
+        // Check for pause/resume signals
+        while let Ok(control_msg) = control_rx.try_recv() {
+            match control_msg {
+                crate::TransferControl::Pause => {
+                    let _ = event_tx
+                        .send(AppEvent::Status(format!(
+                            "[DEBUG] Pause requested for {}",
+                            file_name
+                        )))
+                        .await;
+
+                    // Send pause request to receiver
+                    send_msg(&mut send_stream, &TransferMsg::PauseRequest).await?;
+
+                    // Wait for pause ack
+                    let msg = recv_msg(&mut recv_stream).await?;
+                    if !matches!(msg, TransferMsg::PauseAck) {
+                        return Err(anyhow!("Expected PauseAck, got {:?}", msg));
+                    }
+
+                    // Notify UI
+                    let _ = event_tx
+                        .send(AppEvent::TransferPaused {
+                            file_name: file_name.clone(),
+                            is_sending: true,
+                        })
+                        .await;
+
+                    // Wait for resume signal
+                    loop {
+                        if let Some(crate::TransferControl::Resume) = control_rx.recv().await {
+                            let _ = event_tx
+                                .send(AppEvent::Status(format!(
+                                    "[DEBUG] Resume requested for {}",
+                                    file_name
+                                )))
+                                .await;
+
+                            // Send resume request to receiver
+                            send_msg(&mut send_stream, &TransferMsg::ResumeRequest).await?;
+
+                            // Notify UI
+                            let _ = event_tx
+                                .send(AppEvent::TransferResumed {
+                                    file_name: file_name.clone(),
+                                    is_sending: true,
+                                })
+                                .await;
+                            break;
+                        }
+                    }
+                }
+                crate::TransferControl::Resume => {
+                    // Ignore resume if not paused (shouldn't happen)
+                }
+            }
+        }
+
         let n = file.read(&mut buffer).await?;
         if n == 0 {
             let _ = event_tx

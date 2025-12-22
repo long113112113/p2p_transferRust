@@ -44,6 +44,13 @@ pub struct FileInfo {
     pub file_hash: Option<String>,
 }
 
+/// Internal control signals for active transfers
+#[derive(Debug, Clone)]
+pub enum TransferControl {
+    Pause,
+    Resume,
+}
+
 //Struct command from GUI to Core
 #[derive(Debug, Clone)]
 pub enum AppCommand {
@@ -58,6 +65,10 @@ pub enum AppCommand {
     },
     ///Cancel transfer
     CancelTransfer,
+    /// Pause an active transfer
+    PauseTransfer { file_name: String },
+    /// Resume a paused transfer
+    ResumeTransfer { file_name: String },
     /// User submitted verification code (sender side)
     SubmitVerificationCode { target_ip: String, code: String },
 }
@@ -112,6 +123,18 @@ pub enum AppEvent {
         is_sending: bool,
         verified: bool,
     },
+
+    /// Transfer paused
+    TransferPaused {
+        file_name: String,
+        is_sending: bool,
+    },
+
+    /// Transfer resumed
+    TransferResumed {
+        file_name: String,
+        is_sending: bool,
+    },
 }
 
 /// New Thread
@@ -127,6 +150,13 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
 
     // Store pending verification channels (IP -> Sender)
     let mut verification_pending: HashMap<String, oneshot::Sender<String>> = HashMap::new();
+
+    // Store transfer control channels (file_name -> Sender for pause/resume signals)
+    // Using Arc<Mutex<>> for thread-safe access from spawned tasks
+    let transfer_controls = Arc::new(tokio::sync::Mutex::new(HashMap::<
+        String,
+        mpsc::Sender<TransferControl>,
+    >::new()));
 
     // 2. Setup Ports - use constants from discovery module
 
@@ -244,9 +274,10 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 let event_tx_clone = event_tx.clone();
                 let my_peer_id_clone = my_peer_id.clone();
                 let my_name_clone = my_name.clone();
+                let transfer_controls_clone = transfer_controls.clone();
 
                 tokio::spawn(async move {
-                    if let Err(e) = transfer::send_files(
+                    match transfer::send_files(
                         &client_ep,
                         target_addr,
                         files,
@@ -258,8 +289,17 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                     )
                     .await
                     {
-                        let _ =
-                            event_tx_clone.send(AppEvent::Error(format!("Send file error: {}", e)));
+                        Ok(controls) => {
+                            // Store control channels in shared map
+                            let mut map = transfer_controls_clone.lock().await;
+                            for (file_name, control_tx) in controls {
+                                map.insert(file_name, control_tx);
+                            }
+                        }
+                        Err(e) => {
+                            let _ = event_tx_clone
+                                .send(AppEvent::Error(format!("Send file error: {}", e)));
+                        }
                     }
                 });
             }
@@ -267,6 +307,38 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 let _ = event_tx.send(AppEvent::Status("Task cancelled.".to_string()));
                 // Also clear any pending verifications?
                 // verification_pending.clear(); // Maybe not all
+            }
+            AppCommand::PauseTransfer { file_name } => {
+                let map = transfer_controls.lock().await;
+                if let Some(tx) = map.get(&file_name) {
+                    if let Err(_) = tx.send(TransferControl::Pause).await {
+                        let _ = event_tx.send(AppEvent::Error(format!(
+                            "Cannot pause transfer for {} (task closed)",
+                            file_name
+                        )));
+                    }
+                } else {
+                    let _ = event_tx.send(AppEvent::Error(format!(
+                        "No active transfer found for {}",
+                        file_name
+                    )));
+                }
+            }
+            AppCommand::ResumeTransfer { file_name } => {
+                let map = transfer_controls.lock().await;
+                if let Some(tx) = map.get(&file_name) {
+                    if let Err(_) = tx.send(TransferControl::Resume).await {
+                        let _ = event_tx.send(AppEvent::Error(format!(
+                            "Cannot resume transfer for {} (task closed)",
+                            file_name
+                        )));
+                    }
+                } else {
+                    let _ = event_tx.send(AppEvent::Error(format!(
+                        "No active transfer found for {}",
+                        file_name
+                    )));
+                }
             }
             AppCommand::SubmitVerificationCode { target_ip, code } => {
                 if let Some(tx) = verification_pending.remove(&target_ip) {

@@ -23,6 +23,12 @@ pub enum TransferMsg {
     ReadyForData,
     /// Resume transfer from offset
     ResumeInfo { offset: u64 },
+    /// Request to pause the active transfer
+    PauseRequest,
+    /// Acknowledge pause request
+    PauseAck,
+    /// Request to resume the paused transfer
+    ResumeRequest,
 }
 
 /// Send a protocol message over a bidirectional stream

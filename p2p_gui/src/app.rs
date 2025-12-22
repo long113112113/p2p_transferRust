@@ -41,6 +41,7 @@ struct TransferState {
     progress: f32,
     speed: String,
     is_sending: bool,
+    is_paused: bool,
     verification_status: Option<VerificationStatus>,
 }
 
@@ -164,16 +165,20 @@ impl eframe::App for MyApp {
                     speed,
                     is_sending,
                 } => {
-                    self.active_transfers.insert(
-                        file_name.clone(),
-                        TransferState {
+                    self.active_transfers
+                        .entry(file_name.clone())
+                        .and_modify(|t| {
+                            t.progress = progress;
+                            t.speed = speed.clone();
+                        })
+                        .or_insert(TransferState {
                             file_name: file_name.clone(),
                             progress,
                             speed: speed.clone(),
                             is_sending,
+                            is_paused: false,
                             verification_status: None,
-                        },
-                    );
+                        });
                     // Progress already shown in progress bar, no need to log
                 }
                 AppEvent::TransferCompleted(file_name) => {
@@ -192,6 +197,24 @@ impl eframe::App for MyApp {
                     if let Some(transfer) = self.active_transfers.get_mut(&file_name) {
                         transfer.verification_status = Some(VerificationStatus::Verifying);
                     }
+                }
+                AppEvent::TransferPaused {
+                    file_name,
+                    is_sending: _,
+                } => {
+                    if let Some(transfer) = self.active_transfers.get_mut(&file_name) {
+                        transfer.is_paused = true;
+                    }
+                    self.status_log.push(format!("[Paused] {}", file_name));
+                }
+                AppEvent::TransferResumed {
+                    file_name,
+                    is_sending: _,
+                } => {
+                    if let Some(transfer) = self.active_transfers.get_mut(&file_name) {
+                        transfer.is_paused = false;
+                    }
+                    self.status_log.push(format!("[Resumed] {}", file_name));
                 }
                 AppEvent::VerificationCompleted {
                     file_name,
@@ -277,7 +300,32 @@ impl eframe::App for MyApp {
                             }
                         }
 
-                        ui.add(egui::ProgressBar::new(transfer.progress / 100.0).show_percentage());
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::ProgressBar::new(transfer.progress / 100.0).show_percentage(),
+                            );
+
+                            // Add pause/resume button
+                            let (button_text, command) = if transfer.is_paused {
+                                (
+                                    "▶ Resume",
+                                    p2p_core::AppCommand::ResumeTransfer {
+                                        file_name: transfer.file_name.clone(),
+                                    },
+                                )
+                            } else {
+                                (
+                                    "⏸ Pause",
+                                    p2p_core::AppCommand::PauseTransfer {
+                                        file_name: transfer.file_name.clone(),
+                                    },
+                                )
+                            };
+
+                            if ui.button(button_text).clicked() {
+                                let _ = self.cmd_sender.try_send(command);
+                            }
+                        });
                     });
                 }
             }
