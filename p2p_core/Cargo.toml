@@ -21,3 +21,4 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 rcgen = "0.14.6"
 blake3 = { version = "1.8.2", features = ["rayon"] }
 memmap2 = "0.9.5"
+tracing = "0.1.43"

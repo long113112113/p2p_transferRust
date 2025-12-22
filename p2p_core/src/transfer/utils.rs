@@ -30,6 +30,11 @@ pub async fn report_progress(
 ) {
     let progress = (bytes_done as f32 / total_bytes as f32) * 100.0;
     let elapsed = start_time.elapsed().as_secs_f64();
+    let speed_bps = if elapsed > 0.0 {
+        bytes_done.saturating_sub(offset) as f64 / elapsed
+    } else {
+        0.0
+    };
     let speed = format_transfer_speed(bytes_done.saturating_sub(offset), elapsed);
 
     let _ = event_tx
@@ -37,6 +42,7 @@ pub async fn report_progress(
             file_name: file_name.to_string(),
             progress,
             speed,
+            speed_bps,
             is_sending,
         })
         .await;

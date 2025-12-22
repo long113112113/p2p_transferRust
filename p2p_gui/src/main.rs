@@ -9,6 +9,9 @@ mod ui;
 use app::MyApp;
 
 fn main() -> Result<(), eframe::Error> {
+    // 0. Initialize logging
+    tracing_subscriber::fmt::init();
+
     // 1. Create channels (bounded with capacity 1000 for backpressure)
     let (tx_cmd, rx_cmd) = mpsc::channel::<AppCommand>(1000);
     let (tx_event, rx_event) = mpsc::channel::<AppEvent>(1000);

@@ -33,6 +33,7 @@ struct TransferState {
     file_name: String,
     progress: f32,
     speed: String,
+    speed_bps: f64,
     is_sending: bool,
     verification_status: Option<VerificationStatus>,
 }
@@ -203,6 +204,7 @@ impl eframe::App for MyApp {
                     file_name,
                     progress,
                     speed,
+                    speed_bps,
                     is_sending,
                 } => {
                     self.active_transfers
@@ -210,11 +212,13 @@ impl eframe::App for MyApp {
                         .and_modify(|t| {
                             t.progress = progress;
                             t.speed = speed.clone();
+                            t.speed_bps = speed_bps;
                         })
                         .or_insert(TransferState {
                             file_name: file_name.clone(),
                             progress,
                             speed: speed.clone(),
+                            speed_bps,
                             is_sending,
                             verification_status: None,
                         });
@@ -289,24 +293,11 @@ impl eframe::App for MyApp {
         let mut total_download = 0.0;
 
         for transfer in self.active_transfers.values() {
-            // Parse speed string (e.g., "1.5 MB/s")
-            // This is a rough estimation based on the string format from p2p_core
-            let parts: Vec<&str> = transfer.speed.split_whitespace().collect();
-            if parts.len() >= 2
-                && let Ok(val) = parts[0].parse::<f32>()
-            {
-                let mpbs = match parts[1] {
-                    "MB/s" => val,
-                    "KB/s" => val / 1024.0,
-                    "B/s" => val / 1024.0 / 1024.0,
-                    _ => 0.0,
-                };
-
-                if transfer.is_sending {
-                    total_upload += mpbs;
-                } else {
-                    total_download += mpbs;
-                }
+            let mbps = transfer.speed_bps / 1_000_000.0;
+            if transfer.is_sending {
+                total_upload += mbps;
+            } else {
+                total_download += mbps;
             }
         }
 

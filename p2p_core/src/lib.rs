@@ -76,6 +76,7 @@ pub enum AppEvent {
         file_name: String,
         progress: f32,
         speed: String,
+        speed_bps: f64,
         is_sending: bool,
     },
     TransferCompleted(String),
@@ -131,6 +132,11 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 2. Setup Ports - use constants from discovery module
 
     // Send message to GUI
+    tracing::info!(
+        "Backend started. Peer ID: {}, Name: {}",
+        my_peer_id,
+        my_name
+    );
     let _ = event_tx
         .send(AppEvent::Status(format!(
             "Backend started. Name: {}",
@@ -142,6 +148,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     let discovery_service = match DiscoveryService::new(DISCOVERY_PORT).await {
         Ok(ds) => Arc::new(ds),
         Err(e) => {
+            tracing::error!("Failed to bind discovery port {}: {}", DISCOVERY_PORT, e);
             let _ = event_tx
                 .send(AppEvent::Error(format!(
                     "Cant bind port {}: {}",
@@ -234,6 +241,12 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 target_peer_name,
                 files,
             } => {
+                tracing::info!(
+                    "Initiating transfer to {} ({}) with {} files",
+                    target_peer_name,
+                    target_ip,
+                    files.len()
+                );
                 let target_addr: SocketAddr =
                     match format!("{}:{}", target_ip, TRANSFER_PORT).parse() {
                         Ok(addr) => addr,
