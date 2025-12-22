@@ -3,7 +3,7 @@ use anyhow::{Result, anyhow};
 use quinn::Endpoint;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::time::Duration;
+
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc;
@@ -290,9 +290,30 @@ async fn send_single_file(
     // Finish stream
     send_stream.finish()?;
 
-    // Wait a short time for data to be flushed
-    // We use a timeout instead of stopped().await because receiver might not send STOP_SENDING
-    let _ = tokio::time::timeout(Duration::from_secs(2), send_stream.stopped()).await;
+    // Wait for receiver to confirm completion (they send this after flushing and verifying)
+    // We expect TransferComplete. If we close too early, receiver gets "Connection Lost".
+    match recv_msg(&mut recv_stream).await {
+        Ok(TransferMsg::TransferComplete) => {
+            // Transfer confirmed by receiver
+        }
+        Ok(msg) => {
+            let _ = event_tx
+                .send(AppEvent::Error(format!(
+                    "Unexpected completion message: {:?}",
+                    msg
+                )))
+                .await;
+        }
+        Err(e) => {
+            // If receiving failed, it might mean connection dropped or peer closed, which is bad at this stage
+            let _ = event_tx
+                .send(AppEvent::Error(format!(
+                    "Failed to receive completion ack: {}",
+                    e
+                )))
+                .await;
+        }
+    }
 
     // Notify sender that file was sent and verified (we assume receiver will verify)
     let _ = event_tx

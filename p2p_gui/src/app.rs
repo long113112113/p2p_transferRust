@@ -255,9 +255,9 @@ impl eframe::App for MyApp {
                         });
                     }
                     let status = if verified {
-                        "✓ Verified"
+                        format!("{} Verified", egui_phosphor::regular::CHECK_CIRCLE)
                     } else {
-                        "✗ Corrupted"
+                        format!("{} Corrupted", egui_phosphor::regular::X_CIRCLE)
                     };
                     self.status_log.push(LogEntry {
                         message: format!("Verification: {} - {}", file_name, status),
@@ -341,10 +341,16 @@ impl eframe::App for MyApp {
 
                         // Show verification status if available
                         let verification_text = match transfer.verification_status {
-                            Some(VerificationStatus::Verifying) => " ⏳ Verifying...",
-                            Some(VerificationStatus::Verified) => " ✓ Verified",
-                            Some(VerificationStatus::Failed) => " ✗ Corrupted",
-                            None => "",
+                            Some(VerificationStatus::Verifying) => {
+                                format!(" {} Verifying...", egui_phosphor::regular::TIMER)
+                            }
+                            Some(VerificationStatus::Verified) => {
+                                format!(" {} Verified", egui_phosphor::regular::CHECK_CIRCLE)
+                            }
+                            Some(VerificationStatus::Failed) => {
+                                format!(" {} Corrupted", egui_phosphor::regular::X_CIRCLE)
+                            }
+                            None => "".to_string(),
                         };
 
                         let label_text = format!(
@@ -413,8 +419,16 @@ impl eframe::App for MyApp {
                 ui.separator();
 
                 // Bandwidth
-                ui.label(format!("↑ Upload: {:.2} MB/s", total_upload));
-                ui.label(format!("↓ Download: {:.2} MB/s", total_download));
+                ui.label(format!(
+                    "{} Upload: {:.2} MB/s",
+                    egui_phosphor::regular::UPLOAD_SIMPLE,
+                    total_upload
+                ));
+                ui.label(format!(
+                    "{} Download: {:.2} MB/s",
+                    egui_phosphor::regular::DOWNLOAD_SIMPLE,
+                    total_download
+                ));
             });
         });
 

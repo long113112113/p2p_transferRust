@@ -142,6 +142,9 @@ pub async fn receive_file(
             .await;
     }
 
+    // Send TransferComplete to sender so they know we are done
+    send_msg(send, &TransferMsg::TransferComplete).await?;
+
     let _ = event_tx
         .send(AppEvent::TransferCompleted(file_info.file_name.clone()))
         .await;

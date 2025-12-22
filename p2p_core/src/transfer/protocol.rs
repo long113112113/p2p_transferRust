@@ -23,6 +23,8 @@ pub enum TransferMsg {
     ReadyForData,
     /// Resume transfer from offset
     ResumeInfo { offset: u64 },
+    /// Receiver confirms file was received successfully
+    TransferComplete,
 }
 
 /// Send a protocol message over a bidirectional stream
