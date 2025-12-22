@@ -78,15 +78,19 @@ pub fn get_all_pairings() -> Vec<(String, String)> {
 
 /// Generate a random 4-digit verification code
 pub fn generate_verification_code() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use uuid::Uuid;
 
-    // Simple random using timestamp + some variation
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_nanos();
+    // Use a cryptographically secure random number generator via UUID v4
+    let uuid = Uuid::new_v4();
+    let bytes = uuid.as_bytes();
 
-    let code = (seed % 10000) as u32;
+    // Use first 4 bytes to generate a u32, then modulo 10000
+    // UUID v4 uses a CSPRNG, so this is secure enough for short verification codes
+    let mut arr = [0u8; 4];
+    arr.copy_from_slice(&bytes[0..4]);
+    let val = u32::from_ne_bytes(arr);
+
+    let code = val % 10000;
     format!("{:04}", code)
 }
 
