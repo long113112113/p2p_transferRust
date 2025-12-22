@@ -15,15 +15,13 @@ pub fn generate_self_signed_cert()
     Ok((vec![cert_der], key))
 }
 
-/// Create optimized transport configuration for high-speed LAN transfers
 fn create_optimized_transport_config() -> Result<Arc<TransportConfig>> {
     let mut transport_config = TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
     transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
-    // Optimized for 16MB buffer size
-    transport_config.stream_receive_window((64 * 1024 * 1024_u32).into()); // 64 MiB (4x buffer)
-    transport_config.receive_window((128 * 1024 * 1024_u32).into()); // 128 MiB (8x buffer)
-    transport_config.send_window(128 * 1024 * 1024); // 128 MiB
+    transport_config.stream_receive_window((64 * 1024 * 1024_u32).into());
+    transport_config.receive_window((128 * 1024 * 1024_u32).into());
+    transport_config.send_window(128 * 1024 * 1024);
     transport_config.datagram_receive_buffer_size(Some(64 * 1024 * 1024));
     Ok(Arc::new(transport_config))
 }
@@ -48,9 +46,7 @@ pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<Endpoint> {
     Ok(endpoint)
 }
 
-/// Create a QUIC client endpoint (skip certificate verification for P2P)
 pub fn make_client_endpoint() -> Result<Endpoint> {
-    // Create client config that skips certificate verification (for self-signed certs)
     let mut crypto = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))

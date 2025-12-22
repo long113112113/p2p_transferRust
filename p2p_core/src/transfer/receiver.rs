@@ -24,11 +24,9 @@ pub async fn receive_file(
         )))
         .await;
 
-    // 1. Create download directory if needed
     tokio::fs::create_dir_all(download_dir).await?;
     let file_path = download_dir.join(&file_info.file_name);
 
-    // 2. Check for partial file to resume
     let mut offset = 0;
     if file_path.exists() {
         let metadata = tokio::fs::metadata(&file_path).await?;
@@ -36,16 +34,13 @@ pub async fn receive_file(
         if current_size < file_info.file_size {
             offset = current_size;
         } else {
-            // File already present and size >= remote - overwrite for safety
             offset = 0;
         }
     }
 
-    // 3. Send Resume Info
     use super::protocol::{TransferMsg, send_msg};
     send_msg(send, &TransferMsg::ResumeInfo { offset }).await?;
 
-    // 4. Open file
     let mut file = if offset > 0 {
         tokio::fs::OpenOptions::new()
             .write(true)
@@ -56,14 +51,12 @@ pub async fn receive_file(
         File::create(&file_path).await?
     };
 
-    // 5. Receive file data
     let mut received: u64 = offset;
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let total = file_info.file_size;
     let start_time = std::time::Instant::now();
     let mut last_progress_update = 0u64;
 
-    // Send initial progress immediately so UI shows the transfer
     report_progress(
         event_tx,
         &file_info.file_name,
@@ -84,7 +77,6 @@ pub async fn receive_file(
         file.write_all(&buffer[..n]).await?;
         received += n as u64;
 
-        // Report progress more frequently (every BUFFER_SIZE = 1MB or when complete)
         if received == total || received - last_progress_update >= BUFFER_SIZE as u64 {
             last_progress_update = received;
             report_progress(
@@ -102,7 +94,6 @@ pub async fn receive_file(
 
     file.flush().await?;
 
-    // Verify file hash if provided
     if let Some(expected_hash) = file_info.file_hash {
         let _ = event_tx
             .send(AppEvent::VerificationStarted {
@@ -111,9 +102,7 @@ pub async fn receive_file(
             })
             .await;
 
-        // Compute hash of received file
         let computed_hash = compute_file_hash(&file_path).await?;
-
         let verified = computed_hash == expected_hash;
 
         if !verified {
@@ -134,7 +123,6 @@ pub async fn receive_file(
             .await;
     }
 
-    // Send TransferComplete to sender so they know we are done
     send_msg(send, &TransferMsg::TransferComplete).await?;
 
     let _ = event_tx

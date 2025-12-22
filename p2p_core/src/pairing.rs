@@ -8,7 +8,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Pairing expires after 24 hours
 const PAIRING_EXPIRY_SECS: u64 = 24 * 60 * 60;
 
-/// Get current Unix timestamp
 fn now_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -16,7 +15,6 @@ fn now_timestamp() -> u64 {
         .as_secs()
 }
 
-/// Check if a peer is already paired and not expired
 pub fn is_paired(peer_id: &str) -> bool {
     let config = AppConfig::load();
 
@@ -29,7 +27,6 @@ pub fn is_paired(peer_id: &str) -> bool {
     false
 }
 
-/// Add a new pairing (or update existing)
 pub fn add_pairing(peer_id: &str, peer_name: &str) {
     let mut config = AppConfig::load();
 
@@ -42,20 +39,17 @@ pub fn add_pairing(peer_id: &str, peer_name: &str) {
         },
     );
 
-    // Clean up expired pairings
     remove_expired(&mut config);
 
     config.save();
 }
 
-/// Remove a specific pairing
 pub fn remove_pairing(peer_id: &str) {
     let mut config = AppConfig::load();
     config.pairing.remove(peer_id);
     config.save();
 }
 
-/// Remove all expired pairings
 fn remove_expired(config: &mut AppConfig) {
     let now = now_timestamp();
     config.pairing.retain(|_, device| {
@@ -64,7 +58,6 @@ fn remove_expired(config: &mut AppConfig) {
     });
 }
 
-/// Get all currently valid pairings (for debugging/UI)
 pub fn get_all_pairings() -> Vec<(String, String)> {
     let mut config = AppConfig::load();
     remove_expired(&mut config);
@@ -76,11 +69,9 @@ pub fn get_all_pairings() -> Vec<(String, String)> {
         .collect()
 }
 
-/// Generate a random 4-digit verification code
 pub fn generate_verification_code() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    // Simple random using timestamp + some variation
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::ZERO)

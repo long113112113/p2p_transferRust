@@ -34,8 +34,6 @@ impl Default for AppConfig {
     }
 }
 
-/// Get the fixed download directory: ~/p2p_transfer
-/// Works on both Windows and Linux
 pub fn get_download_dir() -> PathBuf {
     directories::UserDirs::new()
         .map(|dirs| dirs.home_dir().to_path_buf())
@@ -44,7 +42,6 @@ pub fn get_download_dir() -> PathBuf {
 }
 
 impl AppConfig {
-    /// Get the config file path
     fn get_config_path() -> Option<PathBuf> {
         if let Ok(test_path) = std::env::var("P2P_TEST_CONFIG_DIR") {
             return Some(PathBuf::from(test_path).join(CONFIG_FILE));
@@ -54,7 +51,6 @@ impl AppConfig {
             .map(|dirs| dirs.config_dir().join(CONFIG_FILE))
     }
 
-    /// Load config from disk or return default
     pub fn load() -> Self {
         let path = match Self::get_config_path() {
             Some(p) => p,
@@ -67,7 +63,6 @@ impl AppConfig {
         }
     }
 
-    /// Save config to disk
     pub fn save(&self) {
         let path = match Self::get_config_path() {
             Some(p) => p,
@@ -84,25 +79,21 @@ impl AppConfig {
     }
 }
 
-/// Get the config directory path for this app
 fn get_config_dir() -> Option<PathBuf> {
     ProjectDirs::from(APP_QUALIFIER, APP_ORGANIZATION, APP_NAME)
         .map(|dirs| dirs.config_dir().to_path_buf())
 }
 
-/// Load existing peer ID from disk, or generate and save a new one
 pub fn get_or_create_peer_id() -> String {
     let config_dir = match get_config_dir() {
         Some(dir) => dir,
         None => {
-            // Fallback: generate new UUID each run (not persistent)
             return Uuid::new_v4().to_string();
         }
     };
 
     let peer_id_path = config_dir.join(PEER_ID_FILE);
 
-    // Try to read existing peer ID
     if let Ok(id) = fs::read_to_string(&peer_id_path) {
         let id = id.trim().to_string();
         if !id.is_empty() {
@@ -110,10 +101,8 @@ pub fn get_or_create_peer_id() -> String {
         }
     }
 
-    // Generate new UUID
     let new_id = Uuid::new_v4().to_string();
 
-    // Try to save it (create config dir if needed)
     if let Err(e) = fs::create_dir_all(&config_dir) {
         eprintln!("Warning: Could not create config dir: {}", e);
         return new_id;

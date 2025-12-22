@@ -117,11 +117,9 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 1. Process Events
         while let Ok(event) = self.event_receiver.try_recv() {
             match event {
                 AppEvent::Status(msg) => {
-                    // Determine log type based on message content
                     let log_type = if msg.contains("error")
                         || msg.contains("Error")
                         || msg.contains("ERROR")
@@ -196,7 +194,6 @@ impl eframe::App for MyApp {
                         *error_msg = Some(message);
                         continue; // Keep window open to show error
                     }
-                    // Close verification window on success or if redundant
                     self.verification_state = VerificationState::None;
                 }
 
@@ -222,7 +219,6 @@ impl eframe::App for MyApp {
                             is_sending,
                             verification_status: None,
                         });
-                    // Progress already shown in progress bar, no need to log
                 }
                 AppEvent::TransferCompleted(file_name) => {
                     self.status_log.push(LogEntry {
@@ -275,13 +271,11 @@ impl eframe::App for MyApp {
             }
         }
 
-        // 2. Prune offline peers - peers not seen within timeout are removed
         let now = Instant::now();
         self.peers.retain(|_, info| {
             now.duration_since(info.last_seen) < Duration::from_secs(PEER_TIMEOUT_SECS)
         });
 
-        // 3. Update Metrics (every 1 second)
         if now.duration_since(self.last_metrics_update) > Duration::from_secs(1) {
             self.system.refresh_cpu_all();
             self.system.refresh_memory();
@@ -301,7 +295,6 @@ impl eframe::App for MyApp {
             }
         }
 
-        // Prepare peer list for UI
         let mut peer_list: Vec<String> = self
             .peers
             .values()
@@ -309,7 +302,6 @@ impl eframe::App for MyApp {
             .collect();
         peer_list.sort();
 
-        // 3. Draw Sidebar (Toolbar)
         ui::toolbar::show(ctx, &mut self.ui_state);
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Active Transfers");

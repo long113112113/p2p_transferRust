@@ -103,7 +103,6 @@ async fn perform_verification_handshake(
     target_addr: SocketAddr,
     input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
 ) -> Result<()> {
-    // 1. Send PairingRequest
     send_msg(
         send,
         &TransferMsg::PairingRequest {
@@ -113,11 +112,9 @@ async fn perform_verification_handshake(
     )
     .await?;
 
-    // 2. Wait for response
     let msg = recv_msg(recv).await?;
     match msg {
         TransferMsg::PairingAccepted => {
-            // Already paired
             let _ = event_tx
                 .send(AppEvent::PairingResult {
                     success: true,
@@ -128,7 +125,6 @@ async fn perform_verification_handshake(
             Ok(())
         }
         TransferMsg::VerificationRequired => {
-            // Need verification
             let _ = event_tx
                 .send(AppEvent::RequestVerificationCode {
                     target_ip: target_addr.ip().to_string(),
@@ -141,7 +137,6 @@ async fn perform_verification_handshake(
                 ))
                 .await;
 
-            // Wait for user input from GUI via channel
             let code = if let Some(rx) = input_code_rx {
                 match rx.await {
                     Ok(c) => c,
@@ -153,7 +148,6 @@ async fn perform_verification_handshake(
 
             send_msg(send, &TransferMsg::VerificationCode { code }).await?;
 
-            // 3. Wait for final result
             let result_msg = recv_msg(recv).await?;
             match result_msg {
                 TransferMsg::VerificationSuccess => {
@@ -209,25 +203,21 @@ async fn send_single_file(
     // Compute hash before sending
     let file_hash = compute_file_hash(file_path).await?;
 
-    // Open bi-directional stream
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
 
-    // 1. Send metadata with hash
     let file_info = FileInfo {
         file_name: file_name.clone(),
         file_size,
-        file_path: PathBuf::new(), // Not needed for transfer
+        file_path: PathBuf::new(),
         file_hash: Some(file_hash.clone()),
     };
 
-    // Wrap in TransferMsg
     send_msg(
         &mut send_stream,
         &TransferMsg::FileMetadata { info: file_info },
     )
     .await?;
 
-    // 2. Wait for Resume Info
     let msg = recv_msg(&mut recv_stream).await?;
     let offset = match msg {
         TransferMsg::ResumeInfo { offset } => offset,
@@ -239,13 +229,11 @@ async fn send_single_file(
         file.seek(SeekFrom::Start(offset)).await?;
     }
 
-    // 3. Send file data
     let mut sent: u64 = offset;
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let start_time = std::time::Instant::now();
     let mut last_progress_update = 0u64;
 
-    // Send initial progress immediately so UI shows the transfer
     report_progress(
         event_tx, &file_name, sent, file_size, start_time, offset, true,
     )

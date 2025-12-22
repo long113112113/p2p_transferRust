@@ -111,7 +111,6 @@ pub async fn run_server(
     }
 }
 
-/// Handle the verification handshake on the receiver side
 async fn handle_verification_handshake(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
@@ -120,11 +119,7 @@ async fn handle_verification_handshake(
     peer_id: String,
     peer_name: String,
 ) -> Result<()> {
-    // 1. (Already received PairingRequest)
-    // 2. Check if already paired
-
     if pairing::is_paired(&peer_id) {
-        // Already paired -> Accept
         send_msg(send, &TransferMsg::PairingAccepted).await?;
         let _ = event_tx
             .send(AppEvent::PairingResult {
@@ -136,11 +131,8 @@ async fn handle_verification_handshake(
         return Ok(());
     }
 
-    // 3. Not paired -> Require Verification
-    // Generate code
     let code = pairing::generate_verification_code();
 
-    // Notify UI to show code
     let _ = event_tx
         .send(AppEvent::ShowVerificationCode {
             code: code.clone(),
@@ -149,17 +141,14 @@ async fn handle_verification_handshake(
         })
         .await;
 
-    // Send challenge to sender
     send_msg(send, &TransferMsg::VerificationRequired).await?;
 
-    // 4. Wait for VerificationCode
     let msg = recv_msg(recv).await?;
     match msg {
         TransferMsg::VerificationCode {
             code: received_code,
         } => {
             if received_code == code {
-                // Success
                 pairing::add_pairing(&peer_id, &peer_name);
                 send_msg(send, &TransferMsg::VerificationSuccess).await?;
                 let _ = event_tx
@@ -171,7 +160,6 @@ async fn handle_verification_handshake(
                     .await;
                 Ok(())
             } else {
-                // Failed
                 send_msg(
                     send,
                     &TransferMsg::VerificationFailed {
