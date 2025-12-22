@@ -25,12 +25,6 @@ pub async fn send_files(
 ) -> Result<()> {
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "[DEBUG] send_files called. Target: {}, Files: {:?}",
-            target_addr, files
-        )))
-        .await;
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
             "Connecting to: {} ({})",
             target_peer_name, target_addr
         )))
@@ -62,45 +56,20 @@ pub async fn send_files(
         ))
         .await;
 
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] Starting file transfer. Total files: {}",
-            files.len()
-        )))
-        .await;
-
     let mut handles = Vec::new();
 
-    for (idx, file_path) in files.iter().enumerate() {
+    for file_path in files.iter() {
         let connection = connection.clone();
         let file_path = file_path.clone();
         let event_tx = event_tx.clone();
-        let idx = idx;
-        let total_files = files.len();
 
         let handle = tokio::spawn(async move {
-            let _ = event_tx
-                .send(AppEvent::Status(format!(
-                    "[DEBUG] Sending file {}/{}: {}",
-                    idx + 1,
-                    total_files,
-                    file_path.display()
-                )))
-                .await;
-
             if let Err(e) = send_single_file(&connection, &file_path, &event_tx).await {
                 let _ = event_tx
                     .send(AppEvent::Error(format!(
                         "Error sending {}: {}",
                         file_path.display(),
                         e
-                    )))
-                    .await;
-            } else {
-                let _ = event_tx
-                    .send(AppEvent::Status(format!(
-                        "[DEBUG] File sent successfully: {}",
-                        file_path.display()
                     )))
                     .await;
             }
@@ -165,7 +134,7 @@ async fn perform_verification_handshake(
 
             let _ = event_tx
                 .send(AppEvent::Status(
-                    "Vui lòng nhập mã xác thực trên máy kia...".to_string(),
+                    "Please enter the verification code shown on the other device...".to_string(),
                 ))
                 .await;
 
@@ -189,7 +158,7 @@ async fn perform_verification_handshake(
                         .send(AppEvent::PairingResult {
                             success: true,
                             peer_name: target_peer_name,
-                            message: "Xác thực thành công".to_string(),
+                            message: "Verification successful".to_string(),
                         })
                         .await;
                     Ok(())
@@ -217,13 +186,6 @@ async fn send_single_file(
     file_path: &PathBuf,
     event_tx: &mpsc::Sender<AppEvent>,
 ) -> Result<()> {
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] send_single_file: Opening file {}",
-            file_path.display()
-        )))
-        .await;
-
     // Open file
     let mut file = File::open(file_path).await?;
     let metadata = file.metadata().await?;
@@ -242,34 +204,10 @@ async fn send_single_file(
         .await;
 
     // Compute hash before sending
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] Computing hash for {}...",
-            file_name
-        )))
-        .await;
-
     let file_hash = compute_file_hash(file_path).await?;
 
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] Hash computed: {}",
-            &file_hash[..16] // Show first 16 chars
-        )))
-        .await;
-
     // Open bi-directional stream
-    let _ = event_tx
-        .send(AppEvent::Status(
-            "[DEBUG] Opening bi-directional stream...".to_string(),
-        ))
-        .await;
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
-    let _ = event_tx
-        .send(AppEvent::Status(
-            "[DEBUG] Bi-directional stream opened.".to_string(),
-        ))
-        .await;
 
     // 1. Send metadata with hash
     let file_info = FileInfo {
@@ -286,12 +224,6 @@ async fn send_single_file(
     )
     .await?;
 
-    let _ = event_tx
-        .send(AppEvent::Status(
-            "[DEBUG] Metadata sent successfully. Waiting for resume info...".to_string(),
-        ))
-        .await;
-
     // 2. Wait for Resume Info
     let msg = recv_msg(&mut recv_stream).await?;
     let offset = match msg {
@@ -300,12 +232,6 @@ async fn send_single_file(
     };
 
     if offset > 0 {
-        let _ = event_tx
-            .send(AppEvent::Status(format!(
-                "[DEBUG] Resuming transfer from offset {}",
-                offset
-            )))
-            .await;
         use std::io::SeekFrom;
         file.seek(SeekFrom::Start(offset)).await?;
     }
@@ -315,14 +241,6 @@ async fn send_single_file(
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let start_time = std::time::Instant::now();
     let mut last_progress_update = 0u64;
-
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] Starting to send file data from offset {}: {} bytes remaining",
-            offset,
-            file_size - offset
-        )))
-        .await;
 
     // Send initial progress immediately so UI shows the transfer
     let initial_progress = (sent as f32 / file_size as f32) * 100.0;
@@ -338,12 +256,6 @@ async fn send_single_file(
     loop {
         let n = file.read(&mut buffer).await?;
         if n == 0 {
-            let _ = event_tx
-                .send(AppEvent::Status(format!(
-                    "[DEBUG] File read complete. Total sent: {} bytes",
-                    sent
-                )))
-                .await;
             break;
         }
         send_stream.write_all(&buffer[..n]).await?;
@@ -376,25 +288,11 @@ async fn send_single_file(
     }
 
     // Finish stream
-    let _ = event_tx
-        .send(AppEvent::Status("[DEBUG] Finishing stream...".to_string()))
-        .await;
     send_stream.finish()?;
 
     // Wait a short time for data to be flushed
     // We use a timeout instead of stopped().await because receiver might not send STOP_SENDING
-    let _ = event_tx
-        .send(AppEvent::Status(
-            "[DEBUG] Waiting for data to flush (max 2s)...".to_string(),
-        ))
-        .await;
-
-    // Use tokio timeout to avoid blocking forever
     let _ = tokio::time::timeout(Duration::from_secs(2), send_stream.stopped()).await;
-
-    let _ = event_tx
-        .send(AppEvent::Status("[DEBUG] Stream finished.".to_string()))
-        .await;
 
     // Notify sender that file was sent and verified (we assume receiver will verify)
     let _ = event_tx

@@ -34,23 +34,8 @@ pub async fn receive_file(
         let current_size = metadata.len();
         if current_size < file_info.file_size {
             offset = current_size;
-            let _ = event_tx
-                .send(AppEvent::Status(format!(
-                    "[DEBUG] Found partial file. Resuming from {} bytes",
-                    offset
-                )))
-                .await;
         } else {
-            // File already present and size >= remote.
-            // For now, let's just overwrite (offset 0) to ensure integrity,
-            // OR we could check hash if we fully implemented that.
-            // Let's overwrite for safety unless we do advanced checking.
-            let _ = event_tx
-                .send(AppEvent::Status(format!(
-                    "[DEBUG] File exists with size {} >= {}. Overwriting...",
-                    current_size, file_info.file_size
-                )))
-                .await;
+            // File already present and size >= remote - overwrite for safety
             offset = 0;
         }
     }
@@ -88,23 +73,10 @@ pub async fn receive_file(
         })
         .await;
 
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] receive_file: Starting to receive remaining {} bytes...",
-            total - received
-        )))
-        .await;
-
     while received < total {
         let to_read = std::cmp::min(BUFFER_SIZE as u64, total - received) as usize;
         let n = recv.read(&mut buffer[..to_read]).await?.unwrap_or(0);
         if n == 0 {
-            let _ = event_tx
-                .send(AppEvent::Status(format!(
-                    "[DEBUG] receive_file: Stream returned 0 bytes. Received {}/{} bytes",
-                    received, total
-                )))
-                .await;
             break;
         }
         file.write_all(&buffer[..n]).await?;
@@ -136,13 +108,6 @@ pub async fn receive_file(
         }
     }
 
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "[DEBUG] receive_file: Loop finished. Received {}/{} bytes",
-            received, total
-        )))
-        .await;
-
     file.flush().await?;
 
     // Verify file hash if provided
@@ -154,32 +119,16 @@ pub async fn receive_file(
             })
             .await;
 
-        let _ = event_tx
-            .send(AppEvent::Status(format!(
-                "[DEBUG] Verifying hash for {}...",
-                file_info.file_name
-            )))
-            .await;
-
         // Compute hash of received file
         let computed_hash = compute_file_hash(&file_path).await?;
 
         let verified = computed_hash == expected_hash;
 
-        if verified {
-            let _ = event_tx
-                .send(AppEvent::Status(format!(
-                    "[DEBUG] Hash verification SUCCESS for {}",
-                    file_info.file_name
-                )))
-                .await;
-        } else {
+        if !verified {
             let _ = event_tx
                 .send(AppEvent::Error(format!(
-                    "Hash verification FAILED for {}! Expected: {}..., Got: {}...",
-                    file_info.file_name,
-                    &expected_hash[..16],
-                    &computed_hash[..16]
+                    "Hash verification FAILED for {}!",
+                    file_info.file_name
                 )))
                 .await;
         }
@@ -190,13 +139,6 @@ pub async fn receive_file(
                 is_sending: false,
                 verified,
             })
-            .await;
-    } else {
-        let _ = event_tx
-            .send(AppEvent::Status(format!(
-                "[DEBUG] No hash provided for {}, skipping verification",
-                file_info.file_name
-            )))
             .await;
     }
 

@@ -44,6 +44,21 @@ struct TransferState {
     verification_status: Option<VerificationStatus>,
 }
 
+/// Log entry with type for color coding
+#[derive(Clone)]
+enum LogType {
+    Info,    // Default - gray/white
+    Success, // Green
+    Error,   // Red
+    Warning, // Yellow/Orange
+}
+
+#[derive(Clone)]
+struct LogEntry {
+    message: String,
+    log_type: LogType,
+}
+
 pub struct MyApp {
     // Channels
     cmd_sender: mpsc::Sender<AppCommand>,
@@ -54,7 +69,7 @@ pub struct MyApp {
     verification_state: VerificationState,
 
     // Data
-    status_log: Vec<String>,
+    status_log: Vec<LogEntry>,
     // Key: IP address (unique identifier for now)
     peers: HashMap<String, PeerInfo>,
 
@@ -103,7 +118,26 @@ impl eframe::App for MyApp {
         while let Ok(event) = self.event_receiver.try_recv() {
             match event {
                 AppEvent::Status(msg) => {
-                    self.status_log.push(format!("{}", msg));
+                    // Determine log type based on message content
+                    let log_type = if msg.contains("error")
+                        || msg.contains("Error")
+                        || msg.contains("ERROR")
+                    {
+                        LogType::Error
+                    } else if msg.contains("Complete")
+                        || msg.contains("success")
+                        || msg.contains("Verified")
+                    {
+                        LogType::Success
+                    } else if msg.contains("Connecting") || msg.contains("Starting") {
+                        LogType::Warning
+                    } else {
+                        LogType::Info
+                    };
+                    self.status_log.push(LogEntry {
+                        message: msg,
+                        log_type,
+                    });
                 }
                 AppEvent::PeerFound {
                     peer_id: _,
@@ -143,8 +177,14 @@ impl eframe::App for MyApp {
                     peer_name,
                     message,
                 } => {
-                    self.status_log
-                        .push(format!("Pairing with {}: {}", peer_name, message));
+                    self.status_log.push(LogEntry {
+                        message: format!("Pairing with {}: {}", peer_name, message),
+                        log_type: if success {
+                            LogType::Success
+                        } else {
+                            LogType::Error
+                        },
+                    });
 
                     if !success {
                         if let VerificationState::InputtingCode { error_msg, .. } =
@@ -180,13 +220,18 @@ impl eframe::App for MyApp {
                     // Progress already shown in progress bar, no need to log
                 }
                 AppEvent::TransferCompleted(file_name) => {
-                    self.status_log
-                        .push(format!("[Transfer Complete] {}", file_name));
+                    self.status_log.push(LogEntry {
+                        message: format!("Transfer Complete: {}", file_name),
+                        log_type: LogType::Success,
+                    });
                     self.active_transfers.remove(&file_name);
                     self.refresh_local_files();
                 }
                 AppEvent::Error(msg) => {
-                    self.status_log.push(format!("[ERROR] {}", msg));
+                    self.status_log.push(LogEntry {
+                        message: format!("[ERROR] {}", msg),
+                        log_type: LogType::Error,
+                    });
                 }
                 AppEvent::VerificationStarted {
                     file_name,
@@ -213,8 +258,14 @@ impl eframe::App for MyApp {
                     } else {
                         "✗ Corrupted"
                     };
-                    self.status_log
-                        .push(format!("[Verification] {} - {}", file_name, status));
+                    self.status_log.push(LogEntry {
+                        message: format!("Verification: {} - {}", file_name, status),
+                        log_type: if verified {
+                            LogType::Success
+                        } else {
+                            LogType::Error
+                        },
+                    });
                 }
             }
         }
@@ -285,13 +336,21 @@ impl eframe::App for MyApp {
                 }
             }
 
-            // Show status logs
+            // Show status logs with color coding
             ui.separator();
+            ui.label("Status Logs:");
             egui::ScrollArea::vertical()
-                .max_height(200.0) // Increased height
+                .max_height(200.0)
+                .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    for log in &self.status_log {
-                        ui.label(log);
+                    for entry in &self.status_log {
+                        let color = match entry.log_type {
+                            LogType::Info => egui::Color32::GRAY,
+                            LogType::Success => egui::Color32::from_rgb(100, 200, 100),
+                            LogType::Error => egui::Color32::from_rgb(255, 100, 100),
+                            LogType::Warning => egui::Color32::from_rgb(255, 200, 100),
+                        };
+                        ui.colored_label(color, &entry.message);
                     }
                 });
         });

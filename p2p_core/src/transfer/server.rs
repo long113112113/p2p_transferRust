@@ -14,17 +14,7 @@ pub async fn run_server(
     event_tx: mpsc::Sender<AppEvent>,
     download_dir: PathBuf,
 ) {
-    let _ = event_tx
-        .send(AppEvent::Status(
-            "[DEBUG] QUIC Server running, waiting for connections...".to_string(),
-        ))
-        .await;
     while let Some(incoming) = endpoint.accept().await {
-        let _ = event_tx
-            .send(AppEvent::Status(
-                "[DEBUG] Incoming connection received.".to_string(),
-            ))
-            .await;
         let event_tx = event_tx.clone();
         let download_dir = download_dir.clone();
 
@@ -35,13 +25,6 @@ pub async fn run_server(
 
                     // We now use bidirectional streams for EVERYTHING (Handshake AND File Transfer)
                     // The first message determines the type of operation.
-
-                    let _ = event_tx
-                        .send(AppEvent::Status(format!(
-                            "[DEBUG] Connected: {}. Waiting for streams...",
-                            remote_addr
-                        )))
-                        .await;
 
                     while let Ok((mut send_stream, mut recv_stream)) = connection.accept_bi().await
                     {
