@@ -320,13 +320,7 @@ impl eframe::App for MyApp {
 
         // 3. Draw Sidebar (Toolbar)
         ui::toolbar::show(ctx, &mut self.ui_state);
-
-        // 4. Draw Central Panel (Playground)
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Playground");
-            ui.label("Drag and drop panels here.");
-
-            ui.separator();
             ui.heading("Active Transfers");
             if self.active_transfers.is_empty() {
                 ui.label("No active transfers.");
