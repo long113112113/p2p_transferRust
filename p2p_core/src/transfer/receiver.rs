@@ -75,6 +75,18 @@ pub async fn receive_file(
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let total = file_info.file_size;
     let start_time = std::time::Instant::now();
+    let mut last_progress_update = 0u64;
+
+    // Send initial progress immediately so UI shows the transfer
+    let initial_progress = (received as f32 / total as f32) * 100.0;
+    let _ = event_tx
+        .send(AppEvent::TransferProgress {
+            file_name: file_info.file_name.clone(),
+            progress: initial_progress,
+            speed: "Starting...".to_string(),
+            is_sending: false,
+        })
+        .await;
 
     let _ = event_tx
         .send(AppEvent::Status(format!(
@@ -84,10 +96,6 @@ pub async fn receive_file(
         .await;
 
     while received < total {
-        // Note: Pause/resume is controlled by the sender via protocol messages
-        // When sender pauses, it stops sending data, receiver naturally waits
-        // The sender sends PauseRequest/ResumeRequest which we acknowledge
-
         let to_read = std::cmp::min(BUFFER_SIZE as u64, total - received) as usize;
         let n = recv.read(&mut buffer[..to_read]).await?.unwrap_or(0);
         if n == 0 {
@@ -102,8 +110,9 @@ pub async fn receive_file(
         file.write_all(&buffer[..n]).await?;
         received += n as u64;
 
-        // Report progress (less frequent to avoid log spam)
-        if received == total || received % (BUFFER_SIZE as u64 * 10) == 0 {
+        // Report progress more frequently (every BUFFER_SIZE = 1MB or when complete)
+        if received == total || received - last_progress_update >= BUFFER_SIZE as u64 {
+            last_progress_update = received;
             let progress = (received as f32 / total as f32) * 100.0;
             let elapsed = start_time.elapsed().as_secs_f64();
             let speed_bps = if elapsed > 0.0 {
