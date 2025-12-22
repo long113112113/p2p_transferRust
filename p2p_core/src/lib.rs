@@ -131,19 +131,23 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 2. Setup Ports - use constants from discovery module
 
     // Send message to GUI
-    let _ = event_tx.send(AppEvent::Status(format!(
-        "Backend started. Name: {}",
-        my_name
-    )));
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
+            "Backend started. Name: {}",
+            my_name
+        )))
+        .await;
 
     // 3. Init Discovery Service
     let discovery_service = match DiscoveryService::new(DISCOVERY_PORT).await {
         Ok(ds) => Arc::new(ds),
         Err(e) => {
-            let _ = event_tx.send(AppEvent::Error(format!(
-                "Cant bind port {}: {}",
-                DISCOVERY_PORT, e
-            )));
+            let _ = event_tx
+                .send(AppEvent::Error(format!(
+                    "Cant bind port {}: {}",
+                    DISCOVERY_PORT, e
+                )))
+                .await;
             return;
         }
     };
@@ -153,20 +157,26 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     let server_endpoint = match make_server_endpoint(server_addr) {
         Ok(ep) => ep,
         Err(e) => {
-            let _ = event_tx.send(AppEvent::Error(format!("Cant init QUIC server: {}", e)));
+            let _ = event_tx
+                .send(AppEvent::Error(format!("Cant init QUIC server: {}", e)))
+                .await;
             return;
         }
     };
-    let _ = event_tx.send(AppEvent::Status(format!(
-        "QUIC Server listening at port {}",
-        TRANSFER_PORT
-    )));
+    let _ = event_tx
+        .send(AppEvent::Status(format!(
+            "QUIC Server listening at port {}",
+            TRANSFER_PORT
+        )))
+        .await;
 
     // 5. Init QUIC Client Endpoint
     let client_endpoint = match make_client_endpoint() {
         Ok(ep) => Arc::new(ep),
         Err(e) => {
-            let _ = event_tx.send(AppEvent::Error(format!("Cant init QUIC client: {}", e)));
+            let _ = event_tx
+                .send(AppEvent::Error(format!("Cant init QUIC client: {}", e)))
+                .await;
             return;
         }
     };
@@ -211,7 +221,9 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         match cmd {
             AppCommand::StartDiscovery => {
                 // Trigger manual discovery immediately
-                let _ = event_tx.send(AppEvent::Status("Manual scanning...".to_string()));
+                let _ = event_tx
+                    .send(AppEvent::Status("Manual scanning...".to_string()))
+                    .await;
                 discovery_service
                     .send_discovery_request(my_peer_id.clone(), my_name.clone(), TRANSFER_PORT)
                     .await;
@@ -222,15 +234,16 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 target_peer_name,
                 files,
             } => {
-                let target_addr: SocketAddr = match format!("{}:{}", target_ip, TRANSFER_PORT)
-                    .parse()
-                {
-                    Ok(addr) => addr,
-                    Err(e) => {
-                        let _ = event_tx.send(AppEvent::Error(format!("Invalid address: {}", e)));
-                        continue;
-                    }
-                };
+                let target_addr: SocketAddr =
+                    match format!("{}:{}", target_ip, TRANSFER_PORT).parse() {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            let _ = event_tx
+                                .send(AppEvent::Error(format!("Invalid address: {}", e)))
+                                .await;
+                            continue;
+                        }
+                    };
 
                 // Create channel for verification code
                 let (code_tx, code_rx) = oneshot::channel();
@@ -258,33 +271,42 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                     )
                     .await
                     {
-                        let _ =
-                            event_tx_clone.send(AppEvent::Error(format!("Send file error: {}", e)));
+                        let _ = event_tx_clone
+                            .send(AppEvent::Error(format!("Send file error: {}", e)))
+                            .await;
                     }
                 });
             }
             AppCommand::CancelTransfer => {
-                let _ = event_tx.send(AppEvent::Status("Task cancelled.".to_string()));
+                let _ = event_tx
+                    .send(AppEvent::Status("Task cancelled.".to_string()))
+                    .await;
                 // Also clear any pending verifications?
                 // verification_pending.clear(); // Maybe not all
             }
             AppCommand::SubmitVerificationCode { target_ip, code } => {
                 if let Some(tx) = verification_pending.remove(&target_ip) {
-                    if let Err(_) = tx.send(code.clone()) {
-                        let _ = event_tx.send(AppEvent::Error(
-                            "Cannot send verification code (task closed)".to_string(),
-                        ));
+                    if tx.send(code.clone()).is_err() {
+                        let _ = event_tx
+                            .send(AppEvent::Error(
+                                "Cannot send verification code (task closed)".to_string(),
+                            ))
+                            .await;
                     } else {
-                        let _ = event_tx.send(AppEvent::Status(format!(
-                            "Verification code sent to {}",
-                            target_ip
-                        )));
+                        let _ = event_tx
+                            .send(AppEvent::Status(format!(
+                                "Verification code sent to {}",
+                                target_ip
+                            )))
+                            .await;
                     }
                 } else {
-                    let _ = event_tx.send(AppEvent::Error(format!(
-                        "No pending verification session found for {}",
-                        target_ip
-                    )));
+                    let _ = event_tx
+                        .send(AppEvent::Error(format!(
+                            "No pending verification session found for {}",
+                            target_ip
+                        )))
+                        .await;
                 }
             }
         }

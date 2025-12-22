@@ -2,8 +2,9 @@ use eframe::egui;
 use p2p_core::AppCommand;
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum VerificationState {
+    #[default]
     None,
     /// Shows the code to the receiver
     ShowingCode {
@@ -17,12 +18,6 @@ pub enum VerificationState {
         code_input: String,
         error_msg: Option<String>,
     },
-}
-
-impl Default for VerificationState {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Render verification windows based on state
@@ -126,6 +121,5 @@ pub fn show_verification_windows(
     // Logic to update state after match
     if !open || should_close {
         *state = VerificationState::None;
-        return;
     }
 }

@@ -10,18 +10,10 @@ use tokio::sync::mpsc;
 /// Timeout for peer discovery - peers not seen within this time are pruned
 const PEER_TIMEOUT_SECS: u64 = 12;
 
+#[derive(Default)]
 pub struct AppUIState {
     pub show_devices: bool,
     pub show_files: bool,
-}
-
-impl Default for AppUIState {
-    fn default() -> Self {
-        Self {
-            show_devices: false,
-            show_files: false,
-        }
-    }
 }
 
 struct PeerInfo {
@@ -110,12 +102,11 @@ impl MyApp {
         self.local_files.clear();
         if let Ok(entries) = std::fs::read_dir(&self.download_path) {
             for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_file() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            self.local_files.push(name.to_string());
-                        }
-                    }
+                if let Ok(meta) = entry.metadata()
+                    && meta.is_file()
+                    && let Some(name) = entry.file_name().to_str()
+                {
+                    self.local_files.push(name.to_string());
                 }
             }
         }
@@ -197,13 +188,12 @@ impl eframe::App for MyApp {
                         },
                     });
 
-                    if !success {
-                        if let VerificationState::InputtingCode { error_msg, .. } =
+                    if !success
+                        && let VerificationState::InputtingCode { error_msg, .. } =
                             &mut self.verification_state
-                        {
-                            *error_msg = Some(message);
-                            continue; // Keep window open to show error
-                        }
+                    {
+                        *error_msg = Some(message);
+                        continue; // Keep window open to show error
                     }
                     // Close verification window on success or if redundant
                     self.verification_state = VerificationState::None;
@@ -302,20 +292,20 @@ impl eframe::App for MyApp {
             // Parse speed string (e.g., "1.5 MB/s")
             // This is a rough estimation based on the string format from p2p_core
             let parts: Vec<&str> = transfer.speed.split_whitespace().collect();
-            if parts.len() >= 2 {
-                if let Ok(val) = parts[0].parse::<f32>() {
-                    let mpbs = match parts[1] {
-                        "MB/s" => val,
-                        "KB/s" => val / 1024.0,
-                        "B/s" => val / 1024.0 / 1024.0,
-                        _ => 0.0,
-                    };
+            if parts.len() >= 2
+                && let Ok(val) = parts[0].parse::<f32>()
+            {
+                let mpbs = match parts[1] {
+                    "MB/s" => val,
+                    "KB/s" => val / 1024.0,
+                    "B/s" => val / 1024.0 / 1024.0,
+                    _ => 0.0,
+                };
 
-                    if transfer.is_sending {
-                        total_upload += mpbs;
-                    } else {
-                        total_download += mpbs;
-                    }
+                if transfer.is_sending {
+                    total_upload += mpbs;
+                } else {
+                    total_download += mpbs;
                 }
             }
         }

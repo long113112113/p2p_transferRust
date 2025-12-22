@@ -1,11 +1,10 @@
 use eframe::egui;
 use egui_phosphor::regular::{ARROWS_CLOCKWISE, FILE_TEXT, TRASH};
-use std::path::PathBuf;
 
 pub fn show(
     ctx: &egui::Context,
     open: &mut bool,
-    download_path: &PathBuf,
+    download_path: &std::path::Path,
     local_files: &[String],
     refresh_files: impl FnOnce(),
 ) {

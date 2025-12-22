@@ -86,67 +86,60 @@ impl DiscoveryService {
 
         tokio::spawn(async move {
             let mut buf = [0u8; DISCOVERY_BUFFER_SIZE];
-            loop {
-                match socket.recv_from(&mut buf).await {
-                    Ok((len, addr)) => {
-                        // Check identify packet
-                        if len < MAGIC_BYTES.len() || &buf[..MAGIC_BYTES.len()] != MAGIC_BYTES {
-                            //ignore
-                            continue;
-                        }
+            while let Ok((len, addr)) = socket.recv_from(&mut buf).await {
+                // Check identify packet
+                if len < MAGIC_BYTES.len() || &buf[..MAGIC_BYTES.len()] != MAGIC_BYTES {
+                    //ignore
+                    continue;
+                }
 
-                        // Extract JSON data after identify bytes
-                        let data = &buf[MAGIC_BYTES.len()..len];
+                // Extract JSON data after identify bytes
+                let data = &buf[MAGIC_BYTES.len()..len];
 
-                        if let Ok(msg) = serde_json::from_slice::<DiscoveryMsg>(data) {
-                            match msg {
-                                DiscoveryMsg::DiscoveryRequest {
-                                    peer_id: remote_peer_id,
-                                    my_name: remote_name,
-                                    port: _remote_port,
-                                } => {
-                                    //ignore self
-                                    if remote_peer_id != my_peer_id {
-                                        let response_msg = DiscoveryMsg::DiscoveryResponse {
-                                            peer_id: my_peer_id.clone(),
-                                            my_name: my_name.clone(),
-                                            port: my_port,
-                                        };
-                                        if let Some(packet) = build_packet(&response_msg) {
-                                            let _ = socket.send_to(&packet, addr).await;
-                                        }
-
-                                        //treat this as "Peer found" immediately
-                                        let _ = event_tx
-                                            .send(AppEvent::PeerFound {
-                                                peer_id: remote_peer_id,
-                                                ip: addr.ip().to_string(),
-                                                hostname: remote_name,
-                                            })
-                                            .await;
-                                    }
+                if let Ok(msg) = serde_json::from_slice::<DiscoveryMsg>(data) {
+                    match msg {
+                        DiscoveryMsg::DiscoveryRequest {
+                            peer_id: remote_peer_id,
+                            my_name: remote_name,
+                            port: _remote_port,
+                        } => {
+                            //ignore self
+                            if remote_peer_id != my_peer_id {
+                                let response_msg = DiscoveryMsg::DiscoveryResponse {
+                                    peer_id: my_peer_id.clone(),
+                                    my_name: my_name.clone(),
+                                    port: my_port,
+                                };
+                                if let Some(packet) = build_packet(&response_msg) {
+                                    let _ = socket.send_to(&packet, addr).await;
                                 }
-                                DiscoveryMsg::DiscoveryResponse {
-                                    peer_id: remote_peer_id,
-                                    my_name: remote_name,
-                                    ..
-                                } => {
-                                    //Found a peer
-                                    if remote_peer_id != my_peer_id {
-                                        let _ = event_tx
-                                            .send(AppEvent::PeerFound {
-                                                peer_id: remote_peer_id,
-                                                ip: addr.ip().to_string(),
-                                                hostname: remote_name,
-                                            })
-                                            .await;
-                                    }
-                                }
+
+                                //treat this as "Peer found" immediately
+                                let _ = event_tx
+                                    .send(AppEvent::PeerFound {
+                                        peer_id: remote_peer_id,
+                                        ip: addr.ip().to_string(),
+                                        hostname: remote_name,
+                                    })
+                                    .await;
                             }
                         }
-                    }
-                    Err(_) => {
-                        break;
+                        DiscoveryMsg::DiscoveryResponse {
+                            peer_id: remote_peer_id,
+                            my_name: remote_name,
+                            ..
+                        } => {
+                            //Found a peer
+                            if remote_peer_id != my_peer_id {
+                                let _ = event_tx
+                                    .send(AppEvent::PeerFound {
+                                        peer_id: remote_peer_id,
+                                        ip: addr.ip().to_string(),
+                                        hostname: remote_name,
+                                    })
+                                    .await;
+                            }
+                        }
                     }
                 }
             }

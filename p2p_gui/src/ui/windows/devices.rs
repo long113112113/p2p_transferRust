@@ -33,21 +33,19 @@ pub fn show(
                             std::thread::spawn(move || {
                                 if let Some(files) = rfd::FileDialog::new().pick_files() {
                                     // Extract IP from "Hostname (IP)"
-                                    if let Some(start) = peer_str.rfind('(') {
-                                        if let Some(end) = peer_str.rfind(')') {
-                                            if start < end {
-                                                let ip = peer_str[start + 1..end].to_string();
-                                                let name = peer_str[..start].trim().to_string();
+                                    if let Some(start) = peer_str.rfind('(')
+                                        && let Some(end) = peer_str.rfind(')')
+                                        && start < end
+                                    {
+                                        let ip = peer_str[start + 1..end].to_string();
+                                        let name = peer_str[..start].trim().to_string();
 
-                                                let _ =
-                                                    cmd_tx.blocking_send(AppCommand::SendFile {
-                                                        target_ip: ip,
-                                                        target_peer_id: String::new(),
-                                                        target_peer_name: name,
-                                                        files,
-                                                    });
-                                            }
-                                        }
+                                        let _ = cmd_tx.blocking_send(AppCommand::SendFile {
+                                            target_ip: ip,
+                                            target_peer_id: String::new(),
+                                            target_peer_name: name,
+                                            files,
+                                        });
                                     }
                                 }
                             });

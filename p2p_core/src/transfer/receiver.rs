@@ -88,7 +88,7 @@ pub async fn receive_file(
             let progress = (received as f32 / total as f32) * 100.0;
             let elapsed = start_time.elapsed().as_secs_f64();
             let speed_bps = if elapsed > 0.0 {
-                received as f64 / elapsed
+                (received - offset) as f64 / elapsed
             } else {
                 0.0
             };

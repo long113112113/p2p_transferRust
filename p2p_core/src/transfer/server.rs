@@ -30,7 +30,6 @@ pub async fn run_server(
                     {
                         let event_tx = event_tx.clone();
                         let download_dir = download_dir.clone();
-                        let remote_addr = remote_addr;
 
                         tokio::spawn(async move {
                             // Read first message to determine type

@@ -1,10 +1,9 @@
 use anyhow::Result;
 use blake3::Hasher;
-use std::path::PathBuf;
 
 /// Compute BLAKE3 hash of a file using parallelism
-pub async fn compute_file_hash(file_path: &PathBuf) -> Result<String> {
-    let path = file_path.clone();
+pub async fn compute_file_hash(file_path: &std::path::Path) -> Result<String> {
+    let path = file_path.to_path_buf();
 
     tokio::task::spawn_blocking(move || {
         let file = std::fs::File::open(&path)?;
