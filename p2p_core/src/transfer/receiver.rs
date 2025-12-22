@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 
 use super::constants::BUFFER_SIZE;
 use super::hash::compute_file_hash;
+use super::utils::report_progress;
 
 /// Receive a single file from the stream
 pub async fn receive_file(
@@ -63,15 +64,16 @@ pub async fn receive_file(
     let mut last_progress_update = 0u64;
 
     // Send initial progress immediately so UI shows the transfer
-    let initial_progress = (received as f32 / total as f32) * 100.0;
-    let _ = event_tx
-        .send(AppEvent::TransferProgress {
-            file_name: file_info.file_name.clone(),
-            progress: initial_progress,
-            speed: "Starting...".to_string(),
-            is_sending: false,
-        })
-        .await;
+    report_progress(
+        event_tx,
+        &file_info.file_name,
+        received,
+        total,
+        start_time,
+        offset,
+        false,
+    )
+    .await;
 
     while received < total {
         let to_read = std::cmp::min(BUFFER_SIZE as u64, total - received) as usize;
@@ -85,26 +87,16 @@ pub async fn receive_file(
         // Report progress more frequently (every BUFFER_SIZE = 1MB or when complete)
         if received == total || received - last_progress_update >= BUFFER_SIZE as u64 {
             last_progress_update = received;
-            let progress = (received as f32 / total as f32) * 100.0;
-            let elapsed = start_time.elapsed().as_secs_f64();
-            let speed_bps = if elapsed > 0.0 {
-                (received - offset) as f64 / elapsed
-            } else {
-                0.0
-            };
-            let speed = if speed_bps > 1_000_000.0 {
-                format!("{:.2} MB/s", speed_bps / 1_000_000.0)
-            } else {
-                format!("{:.1} KB/s", speed_bps / 1_000.0)
-            };
-            let _ = event_tx
-                .send(AppEvent::TransferProgress {
-                    file_name: file_info.file_name.clone(),
-                    progress,
-                    speed,
-                    is_sending: false,
-                })
-                .await;
+            report_progress(
+                event_tx,
+                &file_info.file_name,
+                received,
+                total,
+                start_time,
+                offset,
+                false,
+            )
+            .await;
         }
     }
 

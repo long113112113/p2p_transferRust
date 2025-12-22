@@ -15,6 +15,19 @@ pub fn generate_self_signed_cert()
     Ok((vec![cert_der], key))
 }
 
+/// Create optimized transport configuration for high-speed LAN transfers
+fn create_optimized_transport_config() -> Result<Arc<TransportConfig>> {
+    let mut transport_config = TransportConfig::default();
+    transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
+    transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
+    // Optimized for 16MB buffer size
+    transport_config.stream_receive_window((64 * 1024 * 1024_u32).into()); // 64 MiB (4x buffer)
+    transport_config.receive_window((128 * 1024 * 1024_u32).into()); // 128 MiB (8x buffer)
+    transport_config.send_window(128 * 1024 * 1024); // 128 MiB
+    transport_config.datagram_receive_buffer_size(Some(64 * 1024 * 1024));
+    Ok(Arc::new(transport_config))
+}
+
 /// Create a QUIC server endpoint
 pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<Endpoint> {
     let (certs, key) = generate_self_signed_cert()?;
@@ -29,17 +42,7 @@ pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<Endpoint> {
         quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)?,
     ));
 
-    // Configure transport for high-speed LAN transfers
-    let mut transport_config = TransportConfig::default();
-    transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
-    transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
-    // Optimized for 16MB buffer size
-    transport_config.stream_receive_window((64 * 1024 * 1024_u32).into()); // 64 MiB (4x buffer)
-    transport_config.receive_window((128 * 1024 * 1024_u32).into()); // 128 MiB (8x buffer)
-    transport_config.send_window(128 * 1024 * 1024); // 128 MiB
-    transport_config.datagram_receive_buffer_size(Some(64 * 1024 * 1024));
-
-    server_config.transport_config(Arc::new(transport_config));
+    server_config.transport_config(create_optimized_transport_config()?);
 
     let endpoint = Endpoint::server(server_config, bind_addr)?;
     Ok(endpoint)
@@ -59,17 +62,7 @@ pub fn make_client_endpoint() -> Result<Endpoint> {
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?,
     ));
 
-    // Configure transport for high-speed LAN transfers
-    let mut transport_config = TransportConfig::default();
-    transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
-    transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
-    // Optimized for 16MB buffer size
-    transport_config.stream_receive_window((64 * 1024 * 1024_u32).into()); // 64 MiB (4x buffer)
-    transport_config.receive_window((128 * 1024 * 1024_u32).into()); // 128 MiB (8x buffer)
-    transport_config.send_window(128 * 1024 * 1024); // 128 MiB
-    transport_config.datagram_receive_buffer_size(Some(64 * 1024 * 1024));
-
-    client_config.transport_config(Arc::new(transport_config));
+    client_config.transport_config(create_optimized_transport_config()?);
 
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
     endpoint.set_default_client_config(client_config);

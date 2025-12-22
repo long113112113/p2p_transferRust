@@ -253,26 +253,29 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 // For MVP this is acceptable (assume one active handshake per peer).
                 verification_pending.insert(target_ip.clone(), code_tx);
 
-                let client_ep = client_endpoint.clone();
-                let event_tx_clone = event_tx.clone();
-                let my_peer_id_clone = my_peer_id.clone();
-                let my_name_clone = my_name.clone();
+                let client_endpoint = client_endpoint.clone();
+                let evt = event_tx.clone();
+
+                // Create transfer context
+                let context = transfer::TransferContext {
+                    my_peer_id: my_peer_id.clone(),
+                    my_name: my_name.clone(),
+                    target_peer_name,
+                };
 
                 tokio::spawn(async move {
-                    if let Err(e) = transfer::send_files(
-                        &client_ep,
+                    if let Err(e) = transfer::sender::send_files(
+                        &client_endpoint,
                         target_addr,
                         files,
-                        event_tx_clone.clone(),
-                        my_peer_id_clone,
-                        my_name_clone,
-                        target_peer_name,
+                        evt.clone(),
+                        context,
                         Some(code_rx),
                     )
                     .await
                     {
-                        let _ = event_tx_clone
-                            .send(AppEvent::Error(format!("Send file error: {}", e)))
+                        let _ = evt
+                            .send(AppEvent::Error(format!("File transfer failed: {}", e)))
                             .await;
                     }
                 });

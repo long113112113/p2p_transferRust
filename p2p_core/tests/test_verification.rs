@@ -42,14 +42,18 @@ async fn spawn_client_transfer(
     let client_endpoint = Arc::new(transfer::make_client_endpoint()?);
 
     tokio::spawn(async move {
-        let res = transfer::send_files(
+        let context = transfer::TransferContext {
+            my_peer_id: "client_id_001".to_string(),
+            my_name: "ClientPC".to_string(),
+            target_peer_name: "ServerPC".to_string(),
+        };
+
+        let res = transfer::sender::send_files(
             &client_endpoint,
             server_addr,
             vec![file_path],
             client_ev_tx,
-            "client_id_001".to_string(),
-            "ClientPC".to_string(),
-            "ServerPC".to_string(),
+            context,
             code_rx,
         )
         .await;

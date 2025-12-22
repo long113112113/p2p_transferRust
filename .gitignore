@@ -1,3 +1,6 @@
 /target
 /.agent
-test_file_5gb.bin
+
+# Test files
+*.bin
+test_file_*

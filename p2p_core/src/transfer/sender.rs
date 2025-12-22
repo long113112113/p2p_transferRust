@@ -11,6 +11,15 @@ use tokio::sync::mpsc;
 use super::constants::BUFFER_SIZE;
 use super::hash::compute_file_hash;
 use super::protocol::{TransferMsg, recv_msg, send_msg};
+use super::utils::report_progress;
+
+/// Context for file transfers containing peer information
+#[derive(Debug, Clone)]
+pub struct TransferContext {
+    pub my_peer_id: String,
+    pub my_name: String,
+    pub target_peer_name: String,
+}
 
 /// Send files to a remote peer
 pub async fn send_files(
@@ -18,15 +27,13 @@ pub async fn send_files(
     target_addr: SocketAddr,
     files: Vec<PathBuf>,
     event_tx: mpsc::Sender<AppEvent>,
-    my_peer_id: String,
-    my_name: String,
-    target_peer_name: String,
+    context: TransferContext,
     input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
 ) -> Result<()> {
     let _ = event_tx
         .send(AppEvent::Status(format!(
             "Connecting to: {} ({})",
-            target_peer_name, target_addr
+            context.target_peer_name, target_addr
         )))
         .await;
 
@@ -39,9 +46,7 @@ pub async fn send_files(
         &mut send_stream,
         &mut recv_stream,
         &event_tx,
-        my_peer_id,
-        my_name,
-        target_peer_name.clone(),
+        context.clone(),
         target_addr,
         input_code_rx,
     )
@@ -94,9 +99,7 @@ async fn perform_verification_handshake(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
     event_tx: &mpsc::Sender<AppEvent>,
-    my_peer_id: String,
-    my_name: String,
-    target_peer_name: String,
+    context: TransferContext,
     target_addr: SocketAddr,
     input_code_rx: Option<tokio::sync::oneshot::Receiver<String>>,
 ) -> Result<()> {
@@ -104,8 +107,8 @@ async fn perform_verification_handshake(
     send_msg(
         send,
         &TransferMsg::PairingRequest {
-            peer_id: my_peer_id,
-            peer_name: my_name,
+            peer_id: context.my_peer_id.clone(),
+            peer_name: context.my_name.clone(),
         },
     )
     .await?;
@@ -118,7 +121,7 @@ async fn perform_verification_handshake(
             let _ = event_tx
                 .send(AppEvent::PairingResult {
                     success: true,
-                    peer_name: target_peer_name,
+                    peer_name: context.target_peer_name.clone(),
                     message: "Already paired.".to_string(),
                 })
                 .await;
@@ -157,7 +160,7 @@ async fn perform_verification_handshake(
                     let _ = event_tx
                         .send(AppEvent::PairingResult {
                             success: true,
-                            peer_name: target_peer_name,
+                            peer_name: context.target_peer_name,
                             message: "Verification successful".to_string(),
                         })
                         .await;
@@ -167,7 +170,7 @@ async fn perform_verification_handshake(
                     let _ = event_tx
                         .send(AppEvent::PairingResult {
                             success: false,
-                            peer_name: target_peer_name,
+                            peer_name: context.target_peer_name,
                             message: message.clone(),
                         })
                         .await;
@@ -243,15 +246,10 @@ async fn send_single_file(
     let mut last_progress_update = 0u64;
 
     // Send initial progress immediately so UI shows the transfer
-    let initial_progress = (sent as f32 / file_size as f32) * 100.0;
-    let _ = event_tx
-        .send(AppEvent::TransferProgress {
-            file_name: file_name.clone(),
-            progress: initial_progress,
-            speed: "Starting...".to_string(),
-            is_sending: true,
-        })
-        .await;
+    report_progress(
+        event_tx, &file_name, sent, file_size, start_time, offset, true,
+    )
+    .await;
 
     loop {
         let n = file.read(&mut buffer).await?;
@@ -264,26 +262,10 @@ async fn send_single_file(
         // Report progress more frequently (every BUFFER_SIZE = 1MB or when complete)
         if sent == file_size || sent - last_progress_update >= BUFFER_SIZE as u64 {
             last_progress_update = sent;
-            let progress = (sent as f32 / file_size as f32) * 100.0;
-            let elapsed = start_time.elapsed().as_secs_f64();
-            let speed_bps = if elapsed > 0.0 {
-                (sent - offset) as f64 / elapsed
-            } else {
-                0.0
-            };
-            let speed = if speed_bps > 1_000_000.0 {
-                format!("{:.2} MB/s", speed_bps / 1_000_000.0)
-            } else {
-                format!("{:.1} KB/s", speed_bps / 1_000.0)
-            };
-            let _ = event_tx
-                .send(AppEvent::TransferProgress {
-                    file_name: file_name.clone(),
-                    progress,
-                    speed,
-                    is_sending: true,
-                })
-                .await;
+            report_progress(
+                event_tx, &file_name, sent, file_size, start_time, offset, true,
+            )
+            .await;
         }
     }
 
