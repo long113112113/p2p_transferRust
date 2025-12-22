@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use eframe::egui;
 use p2p_core::{AppCommand, AppEvent, run_backend};
 use std::thread;
