@@ -25,7 +25,13 @@ pub async fn receive_file(
         .await;
 
     tokio::fs::create_dir_all(download_dir).await?;
-    let file_path = download_dir.join(&file_info.file_name);
+
+    // Sentinel: Fix path traversal vulnerability
+    // Extract only the file name component to prevent directory traversal
+    let safe_file_name = std::path::Path::new(&file_info.file_name)
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid file name"))?;
+    let file_path = download_dir.join(safe_file_name);
 
     let mut offset = 0;
     if file_path.exists() {
