@@ -13,10 +13,6 @@ pub async fn compute_file_hash(file_path: &std::path::Path) -> Result<String> {
         let mut hasher = Hasher::new();
 
         if len > 0 {
-            // Use memory mapping for faster file reading and parallel hashing
-            // SAFETY: Memory mapping is unsafe because external modifications to the file
-            // while mapped can lead to undefined behavior. In this local transfer context,
-            // we assume the file is not being modified concurrently.
             match unsafe { memmap2::Mmap::map(&file) } {
                 Ok(mmap) => {
                     hasher.update_rayon(&mmap);
