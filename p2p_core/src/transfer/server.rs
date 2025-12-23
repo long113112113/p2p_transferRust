@@ -23,9 +23,6 @@ pub async fn run_server(
                 Ok(connection) => {
                     let remote_addr = connection.remote_address();
 
-                    // We now use bidirectional streams for EVERYTHING (Handshake AND File Transfer)
-                    // The first message determines the type of operation.
-
                     while let Ok((mut send_stream, mut recv_stream)) = connection.accept_bi().await
                     {
                         let event_tx = event_tx.clone();
@@ -58,9 +55,6 @@ pub async fn run_server(
                                         }
                                         TransferMsg::FileMetadata { info } => {
                                             // Handle File Transfer
-                                            // Note: We already read the metadata message, so we pass it to receive_file
-                                            // OR we can reconstruct it, OR change receive_file signature.
-                                            // Let's change receive_file signature to accept the info and streams.
 
                                             if let Err(e) = receive_file(
                                                 &mut send_stream,

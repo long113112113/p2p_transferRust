@@ -240,10 +240,12 @@ async fn send_single_file(
     .await;
 
     loop {
+        //Read file to buffer
         let n = file.read(&mut buffer).await?;
         if n == 0 {
             break;
         }
+        //Send buffer to remote peer
         send_stream.write_all(&buffer[..n]).await?;
         sent += n as u64;
 
