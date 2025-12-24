@@ -1,6 +1,25 @@
 use crate::AppEvent;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::sync::mpsc;
+
+/// Sanitize filename to prevent path traversal
+pub fn sanitize_filename(filename: &str) -> PathBuf {
+    let path = Path::new(filename);
+    // Get the file name component (strips directories)
+    match path.file_name() {
+        Some(name) => {
+            let name_str = name.to_string_lossy();
+            // Additional check for empty or dot-only names
+            if name_str == "." || name_str == ".." || name_str.is_empty() {
+                PathBuf::from("unnamed_file")
+            } else {
+                PathBuf::from(name_str.into_owned())
+            }
+        }
+        None => PathBuf::from("unnamed_file"),
+    }
+}
 
 /// Format transfer speed from bytes and elapsed time
 pub fn format_transfer_speed(bytes_transferred: u64, elapsed_secs: f64) -> String {

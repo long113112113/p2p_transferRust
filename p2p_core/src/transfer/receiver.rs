@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use super::constants::BUFFER_SIZE;
 use super::hash::compute_file_hash;
-use super::utils::report_progress;
+use super::utils::{report_progress, sanitize_filename};
 
 /// Receive a single file from the stream
 pub async fn receive_file(
@@ -24,8 +24,11 @@ pub async fn receive_file(
         )))
         .await;
 
+    // Sanitize the filename to prevent path traversal
+    let safe_filename = sanitize_filename(&file_info.file_name);
+
     tokio::fs::create_dir_all(download_dir).await?;
-    let file_path = download_dir.join(&file_info.file_name);
+    let file_path = download_dir.join(&safe_filename);
 
     let mut offset = 0;
     if file_path.exists() {
