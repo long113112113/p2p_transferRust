@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use super::constants::BUFFER_SIZE;
 use super::hash::compute_file_hash;
-use super::utils::report_progress;
+use super::utils::{report_progress, sanitize_file_name};
 
 /// Receive a single file from the stream
 pub async fn receive_file(
@@ -15,8 +15,11 @@ pub async fn receive_file(
     recv: &mut quinn::RecvStream,
     download_dir: &PathBuf,
     event_tx: &mpsc::Sender<AppEvent>,
-    file_info: FileInfo,
+    mut file_info: FileInfo,
 ) -> Result<()> {
+    // Sanitize file name
+    file_info.file_name = sanitize_file_name(&file_info.file_name);
+
     let _ = event_tx
         .send(AppEvent::Status(format!(
             "Receiving: {} ({} bytes)",

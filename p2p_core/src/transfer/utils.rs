@@ -1,6 +1,16 @@
 use crate::AppEvent;
+use std::path::Path;
 use std::time::Instant;
 use tokio::sync::mpsc;
+
+/// Sanitize file name to prevent path traversal
+pub fn sanitize_file_name(file_name: &str) -> String {
+    Path::new(file_name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown_file")
+        .to_string()
+}
 
 /// Format transfer speed from bytes and elapsed time
 pub fn format_transfer_speed(bytes_transferred: u64, elapsed_secs: f64) -> String {
@@ -46,4 +56,20 @@ pub async fn report_progress(
             is_sending,
         })
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_file_name() {
+        assert_eq!(sanitize_file_name("normal_file.txt"), "normal_file.txt");
+        assert_eq!(sanitize_file_name("path/to/file.txt"), "file.txt");
+        assert_eq!(sanitize_file_name("/absolute/path/to/file.txt"), "file.txt");
+        assert_eq!(sanitize_file_name("../../etc/passwd"), "passwd");
+        assert_eq!(sanitize_file_name(".."), "unknown_file");
+        assert_eq!(sanitize_file_name(""), "unknown_file");
+        assert_eq!(sanitize_file_name("foo/../bar.txt"), "bar.txt");
+    }
 }
