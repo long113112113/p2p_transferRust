@@ -8,6 +8,7 @@ use tokio::sync::oneshot;
 
 pub mod config;
 pub mod discovery;
+pub mod http_share;
 pub mod pairing;
 pub mod transfer;
 

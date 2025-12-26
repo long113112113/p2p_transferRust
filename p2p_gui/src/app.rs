@@ -1,4 +1,5 @@
 use crate::ui;
+use crate::ui::windows::qr_code::QrCodeCache;
 use crate::ui::windows::verify::{self, VerificationState};
 use eframe::egui;
 use p2p_core::{AppCommand, AppEvent};
@@ -14,6 +15,7 @@ const PEER_TIMEOUT_SECS: u64 = 12;
 pub struct AppUIState {
     pub show_devices: bool,
     pub show_files: bool,
+    pub show_qrcode: bool,
 }
 
 struct PeerInfo {
@@ -75,6 +77,9 @@ pub struct MyApp {
     // System Metrics
     system: System,
     last_metrics_update: Instant,
+
+    // QR Code
+    qrcode_cache: QrCodeCache,
 }
 
 impl MyApp {
@@ -95,6 +100,7 @@ impl MyApp {
                     .with_memory(MemoryRefreshKind::everything()),
             ),
             last_metrics_update: Instant::now(),
+            qrcode_cache: QrCodeCache::default(),
         };
         app.refresh_local_files();
         app
@@ -435,6 +441,11 @@ impl eframe::App for MyApp {
             if trigger_refresh {
                 self.refresh_local_files();
             }
+        }
+
+        // QR Code Window
+        if self.ui_state.show_qrcode {
+            ui::windows::qr_code::show(ctx, &mut self.ui_state.show_qrcode, &mut self.qrcode_cache);
         }
 
         // 7. Draw Verification Windows
