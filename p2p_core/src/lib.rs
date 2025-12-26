@@ -66,6 +66,8 @@ pub enum AppCommand {
     StartHttpServer,
     /// Stop the HTTP server
     StopHttpServer,
+    /// Respond to upload request from web
+    RespondUploadRequest { request_id: String, accepted: bool },
 }
 //Struct report from Core to GUI
 #[derive(Debug, Clone)]
@@ -132,6 +134,32 @@ pub enum AppEvent {
 
     /// HTTP server has been stopped
     HttpServerStopped,
+
+    /// Upload request from web client
+    UploadRequest {
+        request_id: String,
+        file_name: String,
+        file_size: u64,
+        from_ip: String,
+    },
+
+    /// Upload request cancelled (timeout or client disconnected)
+    UploadRequestCancelled {
+        request_id: String,
+    },
+
+    /// Upload progress update
+    UploadProgress {
+        request_id: String,
+        received_bytes: u64,
+        total_bytes: u64,
+    },
+
+    /// Upload completed successfully
+    UploadCompleted {
+        file_name: String,
+        saved_path: String,
+    },
 }
 
 /// New Thread
@@ -154,15 +182,11 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 2. Setup Ports - use constants from discovery module
 
     // Send message to GUI
-    tracing::info!(
-        "Backend started. Peer ID: {}, Name: {}",
-        my_peer_id,
-        my_name
-    );
+    tracing::info!("Peer ID: {}, Name: {}", my_peer_id, my_name);
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "Backend started. Name: {}",
-            my_name
+            "Peer ID: {}, Name: {}",
+            my_peer_id, my_name
         )))
         .await;
 
@@ -245,8 +269,9 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     });
 
-    // 9. HTTP Server state - will be started on demand via command
+    // 9. HTTP Server state
     let mut http_cancel_token: Option<CancellationToken> = None;
+    let upload_state = Arc::new(http_share::UploadState::new());
 
     // Main loop: Wait for commands from UI
     while let Some(cmd) = cmd_rx.recv().await {
@@ -287,8 +312,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 let (code_tx, code_rx) = oneshot::channel();
 
                 // Store tx in map, keyed by IP
-                // Note: If multiple transfers to same IP, this overwrites.
-                // For MVP this is acceptable (assume one active handshake per peer).
                 verification_pending.insert(target_ip.clone(), code_tx);
 
                 let client_endpoint = client_endpoint.clone();
@@ -322,8 +345,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 let _ = event_tx
                     .send(AppEvent::Status("Task cancelled.".to_string()))
                     .await;
-                // Also clear any pending verifications?
-                // verification_pending.clear(); // Maybe not all
             }
             AppCommand::SubmitVerificationCode { target_ip, code } => {
                 if let Some(tx) = verification_pending.remove(&target_ip) {
@@ -350,6 +371,12 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                         .await;
                 }
             }
+            AppCommand::RespondUploadRequest {
+                request_id,
+                accepted,
+            } => {
+                http_share::respond_to_upload(&upload_state, &request_id, accepted).await;
+            }
             AppCommand::StartHttpServer => {
                 // Stop existing server if running
                 if let Some(ct) = http_cancel_token.take() {
@@ -359,9 +386,22 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
 
                 // Generate new session token and start server
                 let session_token = http_share::generate_session_token();
+                // Get local IP, preferring non-loopback IPv4
                 let local_ip = local_ip_address::local_ip()
+                    .ok()
+                    .filter(|ip| !ip.is_loopback())
                     .map(|ip| ip.to_string())
-                    .unwrap_or_else(|_| "localhost".to_string());
+                    .unwrap_or_else(|| {
+                        // Fallback: search interfaces for a valid IPv4 LAN address
+                        local_ip_address::list_afinet_netifas()
+                            .ok()
+                            .and_then(|ips| {
+                                ips.into_iter()
+                                    .find(|(_name, ip)| !ip.is_loopback() && ip.is_ipv4())
+                                    .map(|(_name, ip)| ip.to_string())
+                            })
+                            .unwrap_or_else(|| "localhost".to_string())
+                    });
                 let share_url = format!(
                     "http://{}:{}/{}",
                     local_ip,
@@ -375,9 +415,13 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 let http_event_tx = event_tx.clone();
                 let token_clone = session_token.clone();
                 let url_clone = share_url.clone();
+                let upload_state_clone = upload_state.clone();
+
                 tokio::spawn(async move {
-                    if let Err(e) = http_share::start_default_http_server_with_token(
+                    if let Err(e) = http_share::start_default_http_server_with_websocket(
                         &token_clone,
+                        http_event_tx.clone(),
+                        upload_state_clone,
                         Some(cancel_token),
                     )
                     .await
