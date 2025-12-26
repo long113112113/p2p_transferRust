@@ -1,19 +1,11 @@
 use anyhow::Result;
 use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
-use rcgen::generate_simple_self_signed;
-use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+use rustls::pki_types::CertificateDer;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Generate a self-signed certificate for QUIC
-pub fn generate_self_signed_cert()
--> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>)> {
-    let certified_key = generate_simple_self_signed(vec!["localhost".to_string()])?;
-    let key = PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der());
-    let cert_der = CertificateDer::from(certified_key.cert.der().to_vec());
-    Ok((vec![cert_der], key))
-}
+use crate::transfer::utils::generate_self_signed_cert;
 
 fn create_optimized_transport_config() -> Result<Arc<TransportConfig>> {
     let mut transport_config = TransportConfig::default();
