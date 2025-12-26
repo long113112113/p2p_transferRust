@@ -78,8 +78,11 @@ pub struct MyApp {
     system: System,
     last_metrics_update: Instant,
 
-    // QR Code
+    // QR Code & HTTP Share
     qrcode_cache: QrCodeCache,
+    share_url: String,
+    http_server_running: bool,
+    http_server_pending: bool,
 }
 
 impl MyApp {
@@ -101,10 +104,14 @@ impl MyApp {
             ),
             last_metrics_update: Instant::now(),
             qrcode_cache: QrCodeCache::default(),
+            share_url: "Server not started".to_string(),
+            http_server_running: false,
+            http_server_pending: false,
         };
         app.refresh_local_files();
         app
     }
+
     pub fn refresh_local_files(&mut self) {
         self.local_files.clear();
         if let Ok(entries) = std::fs::read_dir(&self.download_path) {
@@ -272,6 +279,30 @@ impl eframe::App for MyApp {
                         } else {
                             LogType::Error
                         },
+                    });
+                }
+                AppEvent::ShareUrlReady { url } => {
+                    self.share_url = url;
+                    // Reset QR cache to regenerate with new URL
+                    self.qrcode_cache = QrCodeCache::default();
+                }
+                AppEvent::HttpServerStarted { url } => {
+                    self.share_url = url;
+                    self.http_server_running = true;
+                    self.http_server_pending = false;
+                    self.qrcode_cache = QrCodeCache::default();
+                    self.status_log.push(LogEntry {
+                        message: "HTTP server started".to_string(),
+                        log_type: LogType::Success,
+                    });
+                }
+                AppEvent::HttpServerStopped => {
+                    self.http_server_running = false;
+                    self.http_server_pending = false;
+                    self.share_url = "Server not started".to_string();
+                    self.status_log.push(LogEntry {
+                        message: "HTTP server stopped".to_string(),
+                        log_type: LogType::Info,
                     });
                 }
             }
@@ -445,7 +476,15 @@ impl eframe::App for MyApp {
 
         // QR Code Window
         if self.ui_state.show_qrcode {
-            ui::windows::qr_code::show(ctx, &mut self.ui_state.show_qrcode, &mut self.qrcode_cache);
+            ui::windows::qr_code::show(
+                ctx,
+                &mut self.ui_state.show_qrcode,
+                &mut self.qrcode_cache,
+                &self.share_url,
+                self.http_server_running,
+                &mut self.http_server_pending,
+                &self.cmd_sender,
+            );
         }
 
         // 7. Draw Verification Windows

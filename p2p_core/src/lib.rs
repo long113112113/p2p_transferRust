@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 pub mod config;
 pub mod discovery;
@@ -61,6 +62,10 @@ pub enum AppCommand {
     CancelTransfer,
     /// User submitted verification code (sender side)
     SubmitVerificationCode { target_ip: String, code: String },
+    /// Start the HTTP server for file sharing
+    StartHttpServer,
+    /// Stop the HTTP server
+    StopHttpServer,
 }
 //Struct report from Core to GUI
 #[derive(Debug, Clone)]
@@ -114,12 +119,28 @@ pub enum AppEvent {
         is_sending: bool,
         verified: bool,
     },
+
+    /// HTTP share URL is ready (sent once at startup)
+    ShareUrlReady {
+        url: String,
+    },
+
+    /// HTTP server has been started
+    HttpServerStarted {
+        url: String,
+    },
+
+    /// HTTP server has been stopped
+    HttpServerStopped,
 }
 
 /// New Thread
 /// cmd_rx: listent from GUI
 /// event_tx: send to GUI
 pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc::Sender<AppEvent>) {
+    // Install rustls crypto provider (required for rustls 0.23+)
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // 1. Get Peer ID and Hostname
     let my_peer_id = config::get_or_create_peer_id();
     let my_name = hostname::get()
@@ -224,6 +245,9 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     });
 
+    // 9. HTTP Server state - will be started on demand via command
+    let mut http_cancel_token: Option<CancellationToken> = None;
+
     // Main loop: Wait for commands from UI
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
@@ -323,6 +347,62 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                             "No pending verification session found for {}",
                             target_ip
                         )))
+                        .await;
+                }
+            }
+            AppCommand::StartHttpServer => {
+                // Stop existing server if running
+                if let Some(ct) = http_cancel_token.take() {
+                    ct.cancel();
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+
+                // Generate new session token and start server
+                let session_token = http_share::generate_session_token();
+                let local_ip = local_ip_address::local_ip()
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_else(|_| "localhost".to_string());
+                let share_url = format!(
+                    "http://{}:{}/{}",
+                    local_ip,
+                    http_share::HTTP_PORT,
+                    session_token
+                );
+
+                let cancel_token = CancellationToken::new();
+                http_cancel_token = Some(cancel_token.clone());
+
+                let http_event_tx = event_tx.clone();
+                let token_clone = session_token.clone();
+                let url_clone = share_url.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = http_share::start_default_http_server_with_token(
+                        &token_clone,
+                        Some(cancel_token),
+                    )
+                    .await
+                    {
+                        tracing::error!("HTTP server error: {}", e);
+                        let _ = http_event_tx
+                            .send(AppEvent::Error(format!("HTTP server failed: {}", e)))
+                            .await;
+                    }
+                });
+
+                // Notify GUI that server started
+                let _ = event_tx
+                    .send(AppEvent::HttpServerStarted { url: share_url })
+                    .await;
+                tracing::info!("HTTP server started: {}", url_clone);
+            }
+            AppCommand::StopHttpServer => {
+                if let Some(ct) = http_cancel_token.take() {
+                    ct.cancel();
+                    let _ = event_tx.send(AppEvent::HttpServerStopped).await;
+                    tracing::info!("HTTP server stopped");
+                } else {
+                    let _ = event_tx
+                        .send(AppEvent::Status("HTTP server is not running".to_string()))
                         .await;
                 }
             }
