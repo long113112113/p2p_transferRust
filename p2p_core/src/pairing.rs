@@ -4,6 +4,7 @@
 
 use crate::config::{AppConfig, PairedDevice};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 /// Pairing expires after 24 hours
 const PAIRING_EXPIRY_SECS: u64 = 24 * 60 * 60;
@@ -70,14 +71,14 @@ pub fn get_all_pairings() -> Vec<(String, String)> {
 }
 
 pub fn generate_verification_code() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_nanos();
-
-    let code = (seed % 10000) as u32;
+    // Securely generate a random number for the verification code
+    // We use Uuid::new_v4() which relies on a CSPRNG (getrandom)
+    let uuid = Uuid::new_v4();
+    let bytes = uuid.as_bytes();
+    // Use the first 4 bytes to form a u32
+    // We use from_ne_bytes as we just want a number, endianness doesn't matter for randomness
+    let val = u32::from_ne_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
+    let code = val % 10000;
     format!("{:04}", code)
 }
 
