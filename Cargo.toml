@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "p2p_core",
-    "p2p_gui"
+    "p2p_gui",
+    "p2p_wan"
 ]
 
 resolver = "2"
