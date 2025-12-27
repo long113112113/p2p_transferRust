@@ -387,21 +387,34 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 // Generate new session token and start server
                 let session_token = http_share::generate_session_token();
                 // Get local IP, preferring non-loopback IPv4
-                let local_ip = local_ip_address::local_ip()
+                // Get local IP, prioritizing LAN ranges (192.168.x.x, 10.x.x.x, 172.16.x.x)
+                let local_ip = local_ip_address::list_afinet_netifas()
                     .ok()
-                    .filter(|ip| !ip.is_loopback())
-                    .map(|ip| ip.to_string())
-                    .unwrap_or_else(|| {
-                        // Fallback: search interfaces for a valid IPv4 LAN address
-                        local_ip_address::list_afinet_netifas()
-                            .ok()
-                            .and_then(|ips| {
-                                ips.into_iter()
-                                    .find(|(_name, ip)| !ip.is_loopback() && ip.is_ipv4())
-                                    .map(|(_name, ip)| ip.to_string())
-                            })
-                            .unwrap_or_else(|| "localhost".to_string())
-                    });
+                    .and_then(|ips| {
+                        let mut best_ip = None;
+                        for (_name, ip) in ips {
+                            if ip.is_loopback() || !ip.is_ipv4() {
+                                continue;
+                            }
+                            let ip_str = ip.to_string();
+                            if ip_str.starts_with("192.168.") {
+                                return Some(ip_str); // Best match
+                            }
+                            if ip_str.starts_with("10.") {
+                                best_ip = Some(ip_str);
+                                continue;
+                            }
+                            if ip_str.starts_with("172.") && best_ip.is_none() {
+                                best_ip = Some(ip_str);
+                                continue;
+                            }
+                            if best_ip.is_none() {
+                                best_ip = Some(ip_str);
+                            }
+                        }
+                        best_ip
+                    })
+                    .unwrap_or_else(|| "127.0.0.1".to_string());
                 let share_url = format!(
                     "http://{}:{}/{}",
                     local_ip,

@@ -268,6 +268,22 @@
         input[type="file"] {
             display: none;
         }
+
+        .log-container {
+            background-color: #151515;
+            border: 1px solid var(--stroke);
+            border-radius: var(--radius);
+            padding: 4px;
+            color: var(--text-secondary);
+            font-family: monospace;
+            font-size: 10px;
+            white-space: pre-wrap;
+            overflow-y: auto;
+            width: 100%;
+            height: 120px;
+            margin-top: 4px;
+            word-break: break-all;
+        }
     </style>
 </head>
 
@@ -321,6 +337,15 @@
 
                 <div class="label label-muted">Status</div>
                 <div id="statusText" class="status-text">Idle</div>
+
+                <div class="separator"></div>
+
+                <!-- Logs -->
+                <div class="label label-muted">Logs</div>
+                <div style="text-align: right;">
+                    <button id="toggleLogBtn" class="btn" style="height: 18px; font-size: 10px;">Show</button>
+                </div>
+                <div id="logContainer" class="log-container hidden" style="grid-column: 1 / -1;"></div>
             </div>
 
         </div>
@@ -346,7 +371,9 @@
             cancelBtn: document.getElementById('cancelBtn'),
             progressBar: document.getElementById('progressBar'),
             progressText: document.getElementById('progressText'),
-            statusText: document.getElementById('statusText')
+            statusText: document.getElementById('statusText'),
+            logContainer: document.getElementById('logContainer'),
+            toggleLogBtn: document.getElementById('toggleLogBtn')
         };
 
         let selectedFile = null;
@@ -424,10 +451,46 @@
             updateStatus("Idle", "--text-secondary");
         }
 
+        // --- Logging & Status ---
+        els.toggleLogBtn.addEventListener('click', () => {
+            const isHidden = els.logContainer.classList.contains('hidden');
+            if (isHidden) {
+                els.logContainer.classList.remove('hidden');
+                els.toggleLogBtn.textContent = 'Hide';
+            } else {
+                els.logContainer.classList.add('hidden');
+                els.toggleLogBtn.textContent = 'Show';
+            }
+        });
+
+        function log(msg, type = 'info') {
+            const div = document.createElement('div');
+            const time = new Date().toLocaleTimeString().split(' ')[0]; // HH:MM:SS
+            div.textContent = `[${time}] ${msg}`;
+            if (type === 'error') div.style.color = 'var(--error)';
+            else if (type === 'success') div.style.color = 'var(--success)';
+            else if (type === 'warn') div.style.color = 'var(--text-primary)';
+
+            els.logContainer.appendChild(div);
+            els.logContainer.scrollTop = els.logContainer.scrollHeight;
+        }
+
         function updateStatus(msg, colorVar) {
             els.statusText.textContent = msg;
             els.statusText.style.color = `var(${colorVar})`;
+
+            let type = 'info';
+            if (colorVar.includes('error')) type = 'error';
+            else if (colorVar.includes('success')) type = 'success';
+            else if (colorVar.includes('accent')) type = 'warn';
+
+            log(msg, type);
         }
+
+        // Capture console errors
+        window.onerror = function (message, source, lineno, colno, error) {
+            log(`Window Error: ${message}`, 'error');
+        };
 
         function startUpload() {
             if (!selectedFile) return;
@@ -439,13 +502,35 @@
             updateStatus("Connecting...", "--text-primary");
 
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}/ws`;
+            // Remove trailing slash from pathname if present to avoid double slash
+            const path = window.location.pathname.replace(/\/$/, '');
+            const wsUrl = `${protocol}//${window.location.host}${path}/ws`;
 
-            ws = new WebSocket(wsUrl);
-            ws.binaryType = 'arraybuffer';
+            log(`Connecting to: ${wsUrl}`);
+
+            try {
+                ws = new WebSocket(wsUrl);
+                ws.binaryType = 'arraybuffer';
+            } catch (err) {
+                log(`WebSocket creation failed: ${err}`, 'error');
+                updateStatus("Init Error", "--error");
+                cleanupAfterTransfer();
+                return;
+            }
+
+            // Connection timeout watchdog
+            const timeoutId = setTimeout(() => {
+                if (ws && ws.readyState === WebSocket.CONNECTING) {
+                    log("Connection timed out (>5s). Check firewall?", 'error');
+                    updateStatus("Timed Out", "--error");
+                    ws.close();
+                }
+            }, 5000);
 
             ws.onopen = () => {
-                updateStatus("Waiting approval...", "--text-primary");
+                clearTimeout(timeoutId);
+                log("WebSocket Connected");
+                updateStatus("Please approve on PC...", "--text-primary");
                 ws.send(JSON.stringify({
                     type: "file_info",
                     file_name: selectedFile.name,
@@ -456,12 +541,16 @@
             ws.onmessage = e => handleServerMessage(JSON.parse(e.data));
 
             ws.onerror = e => {
+                clearTimeout(timeoutId);
+                log("WebSocket Error event fired", 'error');
                 console.error(e);
                 updateStatus("Connection Error", "--error");
                 cleanupAfterTransfer();
             };
 
-            ws.onclose = () => {
+            ws.onclose = e => {
+                clearTimeout(timeoutId);
+                log(`WebSocket Closed: code=${e.code}, reason=${e.reason}`, 'warn');
                 if (!els.sendBtn.disabled && els.progressBar.style.width !== '100%') {
                     updateStatus("Connection Closed", "--error");
                 }
