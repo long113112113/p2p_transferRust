@@ -1,6 +1,9 @@
 use crate::FileInfo;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+
+/// Maximum allowed message size (64KB) to prevent DoS via unbounded allocation
+const MAX_MSG_SIZE: usize = 64 * 1024;
 
 /// Protocol messages for transfer handshake
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +34,14 @@ pub async fn recv_msg(recv: &mut quinn::RecvStream) -> Result<TransferMsg> {
     let mut len_buf = [0u8; 4];
     recv.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
+
+    if len > MAX_MSG_SIZE {
+        return Err(anyhow!(
+            "Message too large: {} bytes (max {})",
+            len,
+            MAX_MSG_SIZE
+        ));
+    }
 
     let mut buf = vec![0u8; len];
     recv.read_exact(&mut buf).await?;
