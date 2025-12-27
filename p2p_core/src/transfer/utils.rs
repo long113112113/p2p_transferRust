@@ -1,4 +1,7 @@
 use crate::AppEvent;
+use anyhow::Result;
+use rcgen::generate_simple_self_signed;
+use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use std::path::Path;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -17,6 +20,16 @@ pub fn format_transfer_speed(bytes_transferred: u64, elapsed_secs: f64) -> Strin
         format!("{:.0} B/s", speed_bps)
     }
 }
+
+/// Generate a self-signed certificate for QUIC and HTTPS
+pub fn generate_self_signed_cert()
+-> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>)> {
+    let certified_key = generate_simple_self_signed(vec!["localhost".to_string()])?;
+    let key = PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der());
+    let cert_der = CertificateDer::from(certified_key.cert.der().to_vec());
+    Ok((vec![cert_der], key))
+}
+
 pub fn sanitize_file_name(file_name: &str) -> String {
     Path::new(file_name)
         .file_name()

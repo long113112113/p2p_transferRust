@@ -1,4 +1,6 @@
 use crate::ui;
+use crate::ui::windows::qr_code::QrCodeCache;
+use crate::ui::windows::upload_confirm::{self, UploadConfirmState};
 use crate::ui::windows::verify::{self, VerificationState};
 use eframe::egui;
 use p2p_core::{AppCommand, AppEvent};
@@ -14,6 +16,7 @@ const PEER_TIMEOUT_SECS: u64 = 12;
 pub struct AppUIState {
     pub show_devices: bool,
     pub show_files: bool,
+    pub show_qrcode: bool,
 }
 
 struct PeerInfo {
@@ -61,6 +64,7 @@ pub struct MyApp {
     // App State
     ui_state: AppUIState,
     verification_state: VerificationState,
+    upload_confirm_state: UploadConfirmState,
 
     // Data
     status_log: Vec<LogEntry>,
@@ -75,6 +79,12 @@ pub struct MyApp {
     // System Metrics
     system: System,
     last_metrics_update: Instant,
+
+    // QR Code & HTTP Share
+    qrcode_cache: QrCodeCache,
+    share_url: String,
+    http_server_running: bool,
+    http_server_pending: bool,
 }
 
 impl MyApp {
@@ -84,6 +94,7 @@ impl MyApp {
             event_receiver: rx,
             ui_state: AppUIState::default(),
             verification_state: VerificationState::default(),
+            upload_confirm_state: UploadConfirmState::default(),
             status_log: Vec::new(),
             peers: HashMap::new(),
             download_path: p2p_core::config::get_download_dir(),
@@ -95,10 +106,15 @@ impl MyApp {
                     .with_memory(MemoryRefreshKind::everything()),
             ),
             last_metrics_update: Instant::now(),
+            qrcode_cache: QrCodeCache::default(),
+            share_url: "Server not started".to_string(),
+            http_server_running: false,
+            http_server_pending: false,
         };
         app.refresh_local_files();
         app
     }
+
     pub fn refresh_local_files(&mut self) {
         self.local_files.clear();
         if let Ok(entries) = std::fs::read_dir(&self.download_path) {
@@ -267,6 +283,86 @@ impl eframe::App for MyApp {
                             LogType::Error
                         },
                     });
+                }
+                AppEvent::ShareUrlReady { url } => {
+                    self.share_url = url;
+                    // Reset QR cache to regenerate with new URL
+                    self.qrcode_cache = QrCodeCache::default();
+                }
+                AppEvent::HttpServerStarted { url } => {
+                    self.share_url = url;
+                    self.http_server_running = true;
+                    self.http_server_pending = false;
+                    self.qrcode_cache = QrCodeCache::default();
+                    self.status_log.push(LogEntry {
+                        message: "HTTP server started".to_string(),
+                        log_type: LogType::Success,
+                    });
+                }
+                AppEvent::HttpServerStopped => {
+                    self.http_server_running = false;
+                    self.http_server_pending = false;
+                    self.share_url = "Server not started".to_string();
+                    self.status_log.push(LogEntry {
+                        message: "HTTP server stopped".to_string(),
+                        log_type: LogType::Info,
+                    });
+                }
+                AppEvent::UploadRequest {
+                    request_id,
+                    file_name,
+                    file_size,
+                    from_ip,
+                } => {
+                    self.upload_confirm_state =
+                        UploadConfirmState::Pending(upload_confirm::PendingUpload {
+                            request_id,
+                            file_name,
+                            file_size,
+                            from_ip,
+                        });
+                }
+                AppEvent::UploadRequestCancelled { request_id } => {
+                    if let UploadConfirmState::Pending(upload) = &self.upload_confirm_state {
+                        if upload.request_id == request_id {
+                            self.upload_confirm_state = UploadConfirmState::None;
+                            self.status_log.push(LogEntry {
+                                message: "Upload request cancelled".to_string(),
+                                log_type: LogType::Info,
+                            });
+                        }
+                    }
+                }
+                AppEvent::UploadProgress {
+                    request_id: _,
+                    received_bytes,
+                    total_bytes: _,
+                } => {
+                    // Update main status log periodically or just use debug logs
+                    // For now, let's log completion only to avoid spam,
+                    // real-time progress is shown on the phone.
+                    // Or we could show a special transfer in active_transfers list?
+                    // Let's create a dummy transfer entry for visibility in GUI
+                    // self.active_transfers.entry(request_id)...?
+                    // Ideally we should track it by request_id but active_transfers uses file_name.
+                    // Let's skip detailed progress in GUI for MVP upload, rely on "UploadCompleted".
+                    // Or just log every 10%?
+                    if received_bytes == 0 {
+                        self.status_log.push(LogEntry {
+                            message: format!("Incoming upload started..."),
+                            log_type: LogType::Info,
+                        });
+                    }
+                }
+                AppEvent::UploadCompleted {
+                    file_name,
+                    saved_path: _,
+                } => {
+                    self.status_log.push(LogEntry {
+                        message: format!("Upload received: {}", file_name),
+                        log_type: LogType::Success,
+                    });
+                    self.refresh_local_files();
                 }
             }
         }
@@ -437,8 +533,28 @@ impl eframe::App for MyApp {
             }
         }
 
+        // QR Code Window
+        if self.ui_state.show_qrcode {
+            ui::windows::qr_code::show(
+                ctx,
+                &mut self.ui_state.show_qrcode,
+                &mut self.qrcode_cache,
+                &self.share_url,
+                self.http_server_running,
+                &mut self.http_server_pending,
+                &self.cmd_sender,
+            );
+        }
+
         // 7. Draw Verification Windows
         verify::show_verification_windows(ctx, &mut self.verification_state, &self.cmd_sender);
+
+        // 8. Draw Upload Confirmation Windows
+        upload_confirm::show_upload_confirm_window(
+            ctx,
+            &mut self.upload_confirm_state,
+            &self.cmd_sender,
+        );
 
         // Request repaint periodically to poll for new events from backend
         // This ensures we receive PeerFound events even when the peer list is empty

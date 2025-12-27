@@ -5,9 +5,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 pub mod config;
 pub mod discovery;
+pub mod http_share;
 pub mod pairing;
 pub mod transfer;
 
@@ -60,6 +62,12 @@ pub enum AppCommand {
     CancelTransfer,
     /// User submitted verification code (sender side)
     SubmitVerificationCode { target_ip: String, code: String },
+    /// Start the HTTP server for file sharing
+    StartHttpServer,
+    /// Stop the HTTP server
+    StopHttpServer,
+    /// Respond to upload request from web
+    RespondUploadRequest { request_id: String, accepted: bool },
 }
 //Struct report from Core to GUI
 #[derive(Debug, Clone)]
@@ -113,12 +121,54 @@ pub enum AppEvent {
         is_sending: bool,
         verified: bool,
     },
+
+    /// HTTP share URL is ready (sent once at startup)
+    ShareUrlReady {
+        url: String,
+    },
+
+    /// HTTP server has been started
+    HttpServerStarted {
+        url: String,
+    },
+
+    /// HTTP server has been stopped
+    HttpServerStopped,
+
+    /// Upload request from web client
+    UploadRequest {
+        request_id: String,
+        file_name: String,
+        file_size: u64,
+        from_ip: String,
+    },
+
+    /// Upload request cancelled (timeout or client disconnected)
+    UploadRequestCancelled {
+        request_id: String,
+    },
+
+    /// Upload progress update
+    UploadProgress {
+        request_id: String,
+        received_bytes: u64,
+        total_bytes: u64,
+    },
+
+    /// Upload completed successfully
+    UploadCompleted {
+        file_name: String,
+        saved_path: String,
+    },
 }
 
 /// New Thread
 /// cmd_rx: listent from GUI
 /// event_tx: send to GUI
 pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc::Sender<AppEvent>) {
+    // Install rustls crypto provider (required for rustls 0.23+)
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // 1. Get Peer ID and Hostname
     let my_peer_id = config::get_or_create_peer_id();
     let my_name = hostname::get()
@@ -132,15 +182,11 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 2. Setup Ports - use constants from discovery module
 
     // Send message to GUI
-    tracing::info!(
-        "Backend started. Peer ID: {}, Name: {}",
-        my_peer_id,
-        my_name
-    );
+    tracing::info!("Peer ID: {}, Name: {}", my_peer_id, my_name);
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "Backend started. Name: {}",
-            my_name
+            "Peer ID: {}, Name: {}",
+            my_peer_id, my_name
         )))
         .await;
 
@@ -223,6 +269,10 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     });
 
+    // 9. HTTP Server state
+    let mut http_cancel_token: Option<CancellationToken> = None;
+    let upload_state = Arc::new(http_share::UploadState::new());
+
     // Main loop: Wait for commands from UI
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
@@ -262,8 +312,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 let (code_tx, code_rx) = oneshot::channel();
 
                 // Store tx in map, keyed by IP
-                // Note: If multiple transfers to same IP, this overwrites.
-                // For MVP this is acceptable (assume one active handshake per peer).
                 verification_pending.insert(target_ip.clone(), code_tx);
 
                 let client_endpoint = client_endpoint.clone();
@@ -297,8 +345,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 let _ = event_tx
                     .send(AppEvent::Status("Task cancelled.".to_string()))
                     .await;
-                // Also clear any pending verifications?
-                // verification_pending.clear(); // Maybe not all
             }
             AppCommand::SubmitVerificationCode { target_ip, code } => {
                 if let Some(tx) = verification_pending.remove(&target_ip) {
@@ -322,6 +368,98 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                             "No pending verification session found for {}",
                             target_ip
                         )))
+                        .await;
+                }
+            }
+            AppCommand::RespondUploadRequest {
+                request_id,
+                accepted,
+            } => {
+                http_share::respond_to_upload(&upload_state, &request_id, accepted).await;
+            }
+            AppCommand::StartHttpServer => {
+                // Stop existing server if running
+                if let Some(ct) = http_cancel_token.take() {
+                    ct.cancel();
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+
+                // Generate new session token and start server
+                let session_token = http_share::generate_session_token();
+                // Get local IP, preferring non-loopback IPv4
+                // Get local IP, prioritizing LAN ranges (192.168.x.x, 10.x.x.x, 172.16.x.x)
+                let local_ip = local_ip_address::list_afinet_netifas()
+                    .ok()
+                    .and_then(|ips| {
+                        let mut best_ip = None;
+                        for (_name, ip) in ips {
+                            if ip.is_loopback() || !ip.is_ipv4() {
+                                continue;
+                            }
+                            let ip_str = ip.to_string();
+                            if ip_str.starts_with("192.168.") {
+                                return Some(ip_str); // Best match
+                            }
+                            if ip_str.starts_with("10.") {
+                                best_ip = Some(ip_str);
+                                continue;
+                            }
+                            if ip_str.starts_with("172.") && best_ip.is_none() {
+                                best_ip = Some(ip_str);
+                                continue;
+                            }
+                            if best_ip.is_none() {
+                                best_ip = Some(ip_str);
+                            }
+                        }
+                        best_ip
+                    })
+                    .unwrap_or_else(|| "127.0.0.1".to_string());
+                let share_url = format!(
+                    "http://{}:{}/{}",
+                    local_ip,
+                    http_share::HTTP_PORT,
+                    session_token
+                );
+
+                let cancel_token = CancellationToken::new();
+                http_cancel_token = Some(cancel_token.clone());
+
+                let http_event_tx = event_tx.clone();
+                let token_clone = session_token.clone();
+                let url_clone = share_url.clone();
+                let upload_state_clone = upload_state.clone();
+
+                tokio::spawn(async move {
+                    if let Err(e) = http_share::start_default_http_server_with_websocket(
+                        &token_clone,
+                        http_event_tx.clone(),
+                        upload_state_clone,
+                        Some(cancel_token),
+                    )
+                    .await
+                    {
+                        tracing::error!("HTTP server error: {}", e);
+                        let _ = http_event_tx
+                            .send(AppEvent::Error(format!("HTTP server failed: {}", e)))
+                            .await;
+                    }
+                });
+
+                // Notify GUI that server started
+                let _ = event_tx
+                    .send(AppEvent::HttpServerStarted { url: share_url })
+                    .await;
+                tracing::info!("HTTP server started: {}", url_clone);
+            }
+            AppCommand::StopHttpServer => {
+                if let Some(ct) = http_cancel_token.take() {
+                    ct.cancel();
+                    let _ = event_tx.send(AppEvent::HttpServerStopped).await;
+                    tracing::info!("HTTP server stopped");
+                } else {
+                    let _ = event_tx
+                        .send(AppEvent::Status("HTTP server is not running".to_string()))
                         .await;
                 }
             }
