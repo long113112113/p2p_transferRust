@@ -378,7 +378,7 @@
 
         let selectedFile = null;
         let ws = null;
-        const CHUNK_SIZE = 64 * 1024;
+        const CHUNK_SIZE = 256 * 1024; // 256KB - optimized for LAN
 
         // --- Event Listeners ---
         els.browseBtn.addEventListener('click', () => els.fileInput.click());

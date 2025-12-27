@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Chunk size for binary transfer (64KB)
-pub const CHUNK_SIZE: usize = 64 * 1024;
+/// Chunk size for binary transfer (256KB - optimized for LAN)
+pub const CHUNK_SIZE: usize = 256 * 1024;
 
 /// Timeout for user response (60 seconds)
 pub const USER_RESPONSE_TIMEOUT_SECS: u64 = 60;

@@ -10,9 +10,15 @@ use std::sync::Arc;
 use tokio::{fs::File, io::AsyncWriteExt, sync::oneshot};
 use uuid::Uuid;
 
+/// Ping interval for keeping WebSocket connection alive (5 seconds)
+/// Mobile browsers may have stricter timeouts, so we ping more frequently
+const PING_INTERVAL_SECS: u64 = 5;
+
 /// Handle WebSocket connection
 pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client_ip: String) {
     let (mut sender, mut receiver) = socket.split();
+
+    tracing::info!("WebSocket connection established from: {}", client_ip);
 
     // Wait for file info message
     let file_info = match wait_for_file_info(&mut receiver).await {
@@ -186,58 +192,92 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         }
     };
 
-    // Receive binary chunks
+    // Receive binary chunks with periodic ping to keep connection alive
     let mut received_bytes: u64 = 0;
     let mut last_progress_update = std::time::Instant::now();
 
-    while let Some(msg) = receiver.next().await {
-        match msg {
-            Ok(Message::Binary(data)) => {
-                if let Err(e) = file.write_all(&data).await {
-                    let _ = sender
-                        .send(Message::Text(
-                            serde_json::to_string(&ServerMessage::Error {
-                                message: format!("Write error: {}", e),
-                            })
-                            .unwrap()
-                            .into(),
-                        ))
-                        .await;
-                    return;
-                }
+    // Create ping interval (especially important for mobile browsers)
+    let mut ping_interval =
+        tokio::time::interval(tokio::time::Duration::from_secs(PING_INTERVAL_SECS));
+    ping_interval.tick().await; // Skip first immediate tick
 
-                received_bytes += data.len() as u64;
-
-                // Send progress every 100ms or at completion
-                if last_progress_update.elapsed().as_millis() > 100 || received_bytes >= file_size {
-                    let _ = sender
-                        .send(Message::Text(
-                            serde_json::to_string(&ServerMessage::Progress { received_bytes })
-                                .unwrap()
-                                .into(),
-                        ))
-                        .await;
-
-                    // Also send to GUI
-                    let _ = state
-                        .event_tx
-                        .send(AppEvent::UploadProgress {
-                            request_id: request_id.clone(),
-                            received_bytes,
-                            total_bytes: file_size,
-                        })
-                        .await;
-
-                    last_progress_update = std::time::Instant::now();
-                }
-
-                if received_bytes >= file_size {
+    loop {
+        tokio::select! {
+            // Send periodic ping to keep connection alive
+            _ = ping_interval.tick() => {
+                tracing::info!("Sending WebSocket ping to keep connection alive");
+                if let Err(e) = sender.send(Message::Ping(bytes::Bytes::new())).await {
+                    tracing::error!("Failed to send ping: {}", e);
                     break;
                 }
             }
-            Ok(Message::Close(_)) => break,
-            Err(_) => break,
-            _ => {}
+            // Receive messages from client
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Binary(data))) => {
+                        if let Err(e) = file.write_all(&data).await {
+                            let _ = sender
+                                .send(Message::Text(
+                                    serde_json::to_string(&ServerMessage::Error {
+                                        message: format!("Write error: {}", e),
+                                    })
+                                    .unwrap()
+                                    .into(),
+                                ))
+                                .await;
+                            break;
+                        }
+
+                        received_bytes += data.len() as u64;
+
+                        // Send progress every 100ms or at completion
+                        if last_progress_update.elapsed().as_millis() > 100 || received_bytes >= file_size {
+                            let _ = sender
+                                .send(Message::Text(
+                                    serde_json::to_string(&ServerMessage::Progress { received_bytes })
+                                        .unwrap()
+                                        .into(),
+                                ))
+                                .await;
+
+                            // Also send to GUI
+                            let _ = state
+                                .event_tx
+                                .send(AppEvent::UploadProgress {
+                                    request_id: request_id.clone(),
+                                    received_bytes,
+                                    total_bytes: file_size,
+                                })
+                                .await;
+
+                            last_progress_update = std::time::Instant::now();
+                        }
+
+                        if received_bytes >= file_size {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => {
+                        tracing::info!("Client closed WebSocket connection");
+                        break;
+                    }
+                    Some(Ok(Message::Pong(_))) => {
+                        tracing::info!("Received pong response from client");
+                        // Connection is alive, continue
+                    }
+                    Some(Err(e)) => {
+                        tracing::error!("WebSocket error during upload: {}", e);
+                        break;
+                    }
+                    None => {
+                        tracing::warn!("WebSocket stream ended unexpectedly");
+                        break;
+                    }
+                    _ => {
+                        // Ignore other message types (e.g., Text, Ping)
+                    }
+                }
+            }
         }
     }
 
@@ -282,4 +322,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         received_bytes,
         client_ip
     );
+
+    // Close WebSocket gracefully to avoid abnormal closure (code 1006)
+    let _ = sender.send(Message::Close(None)).await;
+
+    // Give client time to process close frame
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 }
