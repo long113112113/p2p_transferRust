@@ -1,6 +1,1 @@
 /target
-/.agent
-
-# Test files
-*.bin
-test_file_*
