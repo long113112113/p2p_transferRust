@@ -28,6 +28,8 @@ pub fn show(
     state: &mut WanConnectState,
     cmd_tx: &mpsc::Sender<AppCommand>,
     event_tx: &mpsc::Sender<AppEvent>,
+    wan_service: &std::sync::Arc<p2p_wan::ConnectionListener>,
+    wan_rt: &tokio::runtime::Handle,
 ) {
     egui::Window::new(format!("{} WAN Connect", GLOBE))
         .open(open)
@@ -96,111 +98,50 @@ pub fn show(
                             });
                         });
 
-                        // Perform actual connection in a separate thread with its own runtime
-                        // avoiding circular dependency with p2p_core
+                        // Perform connection using shared WanService
+                        let ws = wan_service.clone();
                         let event_tx = event_tx.clone();
                         let target_id_str = target_id_str.clone();
 
-                        std::thread::spawn(move || {
-                            // Helper for initial error before runtime
-                            let report_error_sync = |msg: String| {
-                                let _ = event_tx.blocking_send(AppEvent::Error(msg));
-                            };
-
-                            // Create a local runtime for WAN operations
-                            let rt = match tokio::runtime::Runtime::new() {
-                                Ok(rt) => rt,
+                        wan_rt.spawn(async move {
+                            // 1. Parse Endpoint ID
+                            let endpoint_id = match target_id_str.parse::<iroh::EndpointId>() {
+                                Ok(id) => id,
                                 Err(e) => {
-                                    report_error_sync(format!("Failed to create runtime: {}", e));
+                                    let _ = event_tx
+                                        .send(AppEvent::Error(format!(
+                                            "Invalid Endpoint ID: {}",
+                                            e
+                                        )))
+                                        .await;
                                     return;
                                 }
                             };
 
-                            rt.block_on(async move {
-                                // 1. Parse Endpoint ID
-                                let endpoint_id = match target_id_str.parse::<iroh::EndpointId>() {
-                                    Ok(id) => id,
-                                    Err(e) => {
-                                        let _ = event_tx
-                                            .send(AppEvent::Error(format!(
-                                                "Invalid Endpoint ID: {}",
-                                                e
-                                            )))
-                                            .await;
-                                        return;
-                                    }
-                                };
+                            let _ = event_tx
+                                .send(AppEvent::Status(format!(
+                                    "Connecting to {}...",
+                                    endpoint_id
+                                )))
+                                .await;
 
-                                let _ = event_tx
-                                    .send(AppEvent::Status(format!(
-                                        "Resolving identity for connection..."
-                                    )))
-                                    .await;
-
-                                // 2. Load Identity
-                                let config_dir = p2p_core::config::get_config_dir()
-                                    .unwrap_or_else(|| std::path::PathBuf::from("."));
-                                let manager = p2p_core::identity::IdentityManager::new(config_dir);
-
-                                match manager.load_or_generate().await {
-                                    Ok(secret_key) => {
-                                        // 3. Create Connector
-                                        let _ = event_tx
-                                            .send(AppEvent::Status(
-                                                "Initializing WAN connector...".to_string(),
-                                            ))
-                                            .await;
-                                        match p2p_wan::Connector::new(secret_key).await {
-                                            Ok(connector) => {
-                                                let _ = event_tx
-                                                    .send(AppEvent::Status(format!(
-                                                        "Connecting to {}...",
-                                                        endpoint_id
-                                                    )))
-                                                    .await;
-
-                                                // 4. Connect
-                                                match connector.connect(endpoint_id).await {
-                                                    Ok(connection) => {
-                                                        let _ = event_tx
-                                                            .send(AppEvent::Status(format!(
-                                                                "✓ successfully connected to {}",
-                                                                connection.remote_id()
-                                                            )))
-                                                            .await;
-                                                        // TODO: Store connection for file transfer
-                                                        // For now we just establish it to verify connectivity
-                                                    }
-                                                    Err(e) => {
-                                                        let _ = event_tx
-                                                            .send(AppEvent::Error(format!(
-                                                                "Connection failed: {}",
-                                                                e
-                                                            )))
-                                                            .await;
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                let _ = event_tx
-                                                    .send(AppEvent::Error(format!(
-                                                        "Failed to create connector: {}",
-                                                        e
-                                                    )))
-                                                    .await;
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let _ = event_tx
-                                            .send(AppEvent::Error(format!(
-                                                "Failed to load identity: {}",
-                                                e
-                                            )))
-                                            .await;
-                                    }
+                            // 2. Connect
+                            match ws.connect(endpoint_id).await {
+                                Ok(connection) => {
+                                    let _ = event_tx
+                                        .send(AppEvent::Status(format!(
+                                            "✓ successfully connected to {}",
+                                            connection.remote_id()
+                                        )))
+                                        .await;
+                                    // TODO: Store connection for file transfer
                                 }
-                            });
+                                Err(e) => {
+                                    let _ = event_tx
+                                        .send(AppEvent::Error(format!("Connection failed: {}", e)))
+                                        .await;
+                                }
+                            }
                         });
                     }
                 });

@@ -91,6 +91,8 @@ pub struct MyApp {
 
     // WAN Connect
     wan_connect_state: WanConnectState,
+    wan_service: std::sync::Arc<p2p_wan::ConnectionListener>,
+    wan_runtime: tokio::runtime::Handle,
 }
 
 impl MyApp {
@@ -98,6 +100,8 @@ impl MyApp {
         tx: mpsc::Sender<AppCommand>,
         rx: mpsc::Receiver<AppEvent>,
         event_tx: mpsc::Sender<AppEvent>,
+        wan_service: std::sync::Arc<p2p_wan::ConnectionListener>,
+        wan_runtime: tokio::runtime::Handle,
     ) -> Self {
         let mut app = Self {
             cmd_sender: tx,
@@ -111,17 +115,15 @@ impl MyApp {
             download_path: p2p_core::config::get_download_dir(),
             local_files: Vec::new(),
             active_transfers: HashMap::new(),
-            system: System::new_with_specifics(
-                RefreshKind::nothing()
-                    .with_cpu(CpuRefreshKind::everything())
-                    .with_memory(MemoryRefreshKind::everything()),
-            ),
+            system: System::new_all(),
             last_metrics_update: Instant::now(),
             qrcode_cache: QrCodeCache::default(),
             share_url: "Server not started".to_string(),
             http_server_running: false,
             http_server_pending: false,
             wan_connect_state: WanConnectState::default(),
+            wan_service,
+            wan_runtime,
         };
         app.refresh_local_files();
         app
@@ -576,6 +578,8 @@ impl eframe::App for MyApp {
                 &mut self.wan_connect_state,
                 &self.cmd_sender,
                 &self.event_sender,
+                &self.wan_service,
+                &self.wan_runtime,
             );
         }
 
