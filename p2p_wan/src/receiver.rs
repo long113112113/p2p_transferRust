@@ -184,6 +184,44 @@ pub async fn receive_file(
 
     info!("File received successfully: {}", file_name);
 
+    // Verify hash if provided
+    if let Some(expected_hash) = file_info.file_hash {
+        let _ = event_tx
+            .send(AppEvent::VerificationStarted {
+                file_name: file_name.clone(),
+                is_sending: false,
+            })
+            .await;
+
+        let computed_hash = p2p_core::transfer::hash::compute_file_hash(&file_path).await?;
+        let verified = computed_hash == expected_hash;
+
+        if !verified {
+            tracing::error!(
+                "Hash verification FAILED for {}: expected {} got {}",
+                file_name,
+                &expected_hash[..16],
+                &computed_hash[..16]
+            );
+            let _ = event_tx
+                .send(AppEvent::Error(format!(
+                    "Hash verification FAILED for {}!",
+                    file_name
+                )))
+                .await;
+        } else {
+            info!("Hash verification passed for {}", file_name);
+        }
+
+        let _ = event_tx
+            .send(AppEvent::VerificationCompleted {
+                file_name: file_name.clone(),
+                is_sending: false,
+                verified,
+            })
+            .await;
+    }
+
     // Send completion confirmation
     send_msg(send, &WanTransferMsg::TransferComplete).await?;
 

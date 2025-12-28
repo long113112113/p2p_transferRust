@@ -84,15 +84,34 @@ async fn send_single_file(
         )))
         .await;
 
+    // Compute file hash for verification
+    let _ = event_tx
+        .send(AppEvent::VerificationStarted {
+            file_name: file_name.clone(),
+            is_sending: true,
+        })
+        .await;
+
+    let file_hash = p2p_core::transfer::hash::compute_file_hash(file_path).await?;
+    info!("Computed hash for {}: {}", file_name, &file_hash[..16]);
+
+    let _ = event_tx
+        .send(AppEvent::VerificationCompleted {
+            file_name: file_name.clone(),
+            is_sending: true,
+            verified: true, // Hash computed successfully
+        })
+        .await;
+
     // Open bidirectional stream for this file
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
 
-    // Create FileInfo and send metadata
+    // Create FileInfo and send metadata with hash
     let file_info = FileInfo {
         file_name: file_name.clone(),
         file_size,
         file_path: PathBuf::new(), // Don't expose local path
-        file_hash: None,           // Can be added later for verification
+        file_hash: Some(file_hash),
     };
 
     send_msg(
