@@ -1,6 +1,6 @@
 //! HTTP file sharing module
 //!
-//! Provides a web interface for sharing files via browser with WebSocket upload support.
+//! Browser sharing interface with WebSocket upload support.
 
 pub mod server;
 pub mod websocket;

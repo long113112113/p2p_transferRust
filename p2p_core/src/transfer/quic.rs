@@ -58,7 +58,7 @@ pub fn make_client_endpoint() -> Result<Endpoint> {
     Ok(endpoint)
 }
 
-/// Custom certificate verifier that skips verification (for self-signed certs in P2P)
+/// No-op certificate verifier for P2P self-signed certs
 #[derive(Debug)]
 struct SkipServerVerification;
 

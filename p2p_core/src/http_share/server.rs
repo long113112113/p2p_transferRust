@@ -1,6 +1,6 @@
 //! HTTP server for file sharing
 //!
-//! Simple HTTP server for LAN file sharing with random session token and WebSocket upload.
+//! LAN HTTP server with session tokens and WebSocket uploads.
 
 use crate::AppEvent;
 use crate::config;

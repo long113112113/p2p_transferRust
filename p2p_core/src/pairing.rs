@@ -76,7 +76,7 @@ pub fn generate_verification_code() -> String {
     let uuid = Uuid::new_v4();
     let bytes = uuid.as_bytes();
     // Use the first 4 bytes to form a u32
-    // We use from_ne_bytes as we just want a number, endianness doesn't matter for randomness
+    // Use from_ne_bytes for random number; endianness indifferent
     let val = u32::from_ne_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
     let code = val % 10000;
     format!("{:04}", code)

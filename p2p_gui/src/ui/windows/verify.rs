@@ -107,7 +107,7 @@ pub fn show_verification_windows(
                     // Actually 'state' is borrowed by 'match'.
                     // We can't mutate 'state' here directly if it's borrowed.
                     // But 'match state' borrows it.
-                    // The simplest way: Close on valid submit. For invalid, we need to update state.
+                    // Close on valid submit; otherwise update state.
                     // But we can't easily update state while matching on it.
                     // Refactor: clone necessary data first?
                 }

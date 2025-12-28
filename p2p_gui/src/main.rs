@@ -25,7 +25,7 @@ fn main() -> Result<(), eframe::Error> {
     // 1.5. Initialize WAN Service
     let wan_event_tx = tx_event.clone();
 
-    // Move WAN initialization to a separate thread to avoid COM conflicts on the main thread
+    // Spawn WAN thread to avoid main thread COM conflicts
     let (wan_runtime, wan_service) = thread::spawn(move || {
         let wan_runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

@@ -67,7 +67,7 @@ impl ConnectionListener {
     }
 
     /// Connect to a remote peer using this endpoint
-    /// This allows reusing the same endpoint/port for both incoming and outgoing connections
+    /// Reuse endpoint/port for both incoming and outgoing connections
     pub async fn connect(&self, node_id: EndpointId) -> Result<iroh::endpoint::Connection> {
         info!(
             "Connecting to peer {} from existing listener endpoint...",
