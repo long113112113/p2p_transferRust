@@ -1,7 +1,5 @@
 use eframe::egui;
-use egui_phosphor::regular::{
-    CHECK_CIRCLE, COPY, FILE, FOLDER_OPEN, GLOBE, PAPER_PLANE_RIGHT, PLUGS_CONNECTED,
-};
+use egui_phosphor::regular::{COPY, FILE, FOLDER_OPEN, GLOBE, PAPER_PLANE_RIGHT, PLUGS_CONNECTED};
 use p2p_core::{AppCommand, AppEvent};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -135,14 +133,7 @@ pub fn show(
                             // 2. Connect
                             match ws.connect(endpoint_id).await {
                                 Ok(connection) => {
-                                    let _ = event_tx
-                                        .send(AppEvent::Status(format!(
-                                            "{} successfully connected to {}",
-                                            CHECK_CIRCLE,
-                                            connection.remote_id()
-                                        )))
-                                        .await;
-                                    // Store connection for file transfer
+                                    // Store connection for file transfer (WanConnected event displays success log)
                                     let _ = event_tx.send(AppEvent::WanConnected(connection)).await;
                                 }
                                 Err(e) => {

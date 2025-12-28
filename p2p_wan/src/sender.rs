@@ -26,13 +26,6 @@ pub async fn send_files(
     let peer_id = connection.remote_id();
     info!("Starting file transfer to peer: {}", peer_id);
 
-    let _ = event_tx
-        .send(AppEvent::Status(format!(
-            "Connected to peer: {}. Starting file transfer...",
-            peer_id
-        )))
-        .await;
-
     let mut handles = Vec::new();
 
     for file_path in files.iter() {

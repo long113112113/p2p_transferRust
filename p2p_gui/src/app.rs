@@ -352,15 +352,6 @@ impl eframe::App for MyApp {
                     received_bytes,
                     total_bytes: _,
                 } => {
-                    // Update main status log periodically or just use debug logs
-                    // For now, let's log completion only to avoid spam,
-                    // real-time progress is shown on the phone.
-                    // Or we could show a special transfer in active_transfers list?
-                    // Let's create a dummy transfer entry for visibility in GUI
-                    // self.active_transfers.entry(request_id)...?
-                    // Ideally we should track it by request_id but active_transfers uses file_name.
-                    // Let's skip detailed progress in GUI for MVP upload, rely on "UploadCompleted".
-                    // Or just log every 10%?
                     if received_bytes == 0 {
                         self.status_log.push(LogEntry {
                             message: format!("Incoming upload started..."),
