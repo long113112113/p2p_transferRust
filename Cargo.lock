@@ -4475,7 +4475,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "iroh",
+ "p2p_core",
  "rand 0.9.2",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
