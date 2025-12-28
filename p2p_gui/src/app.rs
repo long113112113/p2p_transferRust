@@ -62,6 +62,7 @@ pub struct MyApp {
     // Channels
     cmd_sender: mpsc::Sender<AppCommand>,
     event_receiver: mpsc::Receiver<AppEvent>,
+    event_sender: mpsc::Sender<AppEvent>,
 
     // App State
     ui_state: AppUIState,
@@ -93,10 +94,15 @@ pub struct MyApp {
 }
 
 impl MyApp {
-    pub fn new(tx: mpsc::Sender<AppCommand>, rx: mpsc::Receiver<AppEvent>) -> Self {
+    pub fn new(
+        tx: mpsc::Sender<AppCommand>,
+        rx: mpsc::Receiver<AppEvent>,
+        event_tx: mpsc::Sender<AppEvent>,
+    ) -> Self {
         let mut app = Self {
             cmd_sender: tx,
             event_receiver: rx,
+            event_sender: event_tx,
             ui_state: AppUIState::default(),
             verification_state: VerificationState::default(),
             upload_confirm_state: UploadConfirmState::default(),
@@ -569,6 +575,7 @@ impl eframe::App for MyApp {
                 &mut self.ui_state.show_wan_connect,
                 &mut self.wan_connect_state,
                 &self.cmd_sender,
+                &self.event_sender,
             );
         }
 

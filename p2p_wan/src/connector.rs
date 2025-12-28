@@ -52,7 +52,13 @@ impl Connector {
     /// - Try UDP hole punching for direct connection
     /// - Fall back to DERP relay if direct connection fails
     pub async fn connect(&self, target_id: EndpointId) -> Result<Connection> {
-        info!("Connecting to peer: {}", target_id);
+        info!("=== WAN Connection Start ===");
+        info!("Target Node ID: {}", target_id);
+        info!("My Node ID: {}", self.endpoint.id());
+        info!("Using ALPN: {:?}", String::from_utf8_lossy(ALPN));
+        info!("Attempting connection (UDP hole punch / DERP relay)...");
+
+        let start = std::time::Instant::now();
 
         let connection = self
             .endpoint
@@ -60,7 +66,11 @@ impl Connector {
             .await
             .context("Failed to connect to peer")?;
 
-        info!("Successfully connected to peer: {}", target_id);
+        let elapsed = start.elapsed();
+        info!("✓ Connected to {} in {:?}", target_id, elapsed);
+        info!("Remote Node ID: {}", connection.remote_id());
+        info!("=== WAN Connection Success ===");
+
         Ok(connection)
     }
 

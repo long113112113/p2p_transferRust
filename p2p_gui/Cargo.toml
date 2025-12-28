@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 p2p_core = { path = "../p2p_core" }
+p2p_wan = { path = "../p2p_wan" }
+iroh = "0.95.1"
 
 eframe = "0.33.3"
 egui_extras = { version = "0.33.3", features = ["all_loaders"] }

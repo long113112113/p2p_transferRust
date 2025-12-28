@@ -69,6 +69,8 @@ pub enum AppCommand {
     StopHttpServer,
     /// Respond to upload request from web
     RespondUploadRequest { request_id: String, accepted: bool },
+    /// Connect to a remote peer over WAN using Iroh
+    WanConnect { target_endpoint_id: String },
 }
 //Struct report from Core to GUI
 #[derive(Debug, Clone)]
@@ -466,6 +468,19 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                         .send(AppEvent::Status("HTTP server is not running".to_string()))
                         .await;
                 }
+            }
+            AppCommand::WanConnect { target_endpoint_id } => {
+                tracing::info!("=== WAN Connect Command Received ===");
+                tracing::info!("Target Endpoint ID: {}", target_endpoint_id);
+
+                // Note: Actual WAN connection is handled in p2p_gui layer
+                // which has access to p2p_wan crate
+                let _ = event_tx
+                    .send(AppEvent::Status(format!(
+                        "WAN Connect request: {}",
+                        target_endpoint_id
+                    )))
+                    .await;
             }
         }
     }

@@ -18,6 +18,7 @@ fn main() -> Result<(), eframe::Error> {
     let (tx_event, rx_event) = mpsc::channel::<AppEvent>(1000);
 
     // 2. Spawn Backend thread
+    let backend_tx_event = tx_event.clone();
     thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -25,7 +26,7 @@ fn main() -> Result<(), eframe::Error> {
             .unwrap();
 
         rt.block_on(async move {
-            run_backend(rx_cmd, tx_event).await;
+            run_backend(rx_cmd, backend_tx_event).await;
         });
     });
 
@@ -45,7 +46,7 @@ fn main() -> Result<(), eframe::Error> {
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
 
-            Ok(Box::new(MyApp::new(tx_cmd, rx_event)))
+            Ok(Box::new(MyApp::new(tx_cmd, rx_event, tx_event)))
         }),
     )
 }
