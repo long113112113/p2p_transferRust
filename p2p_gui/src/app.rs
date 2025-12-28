@@ -2,11 +2,12 @@ use crate::ui;
 use crate::ui::windows::qr_code::QrCodeCache;
 use crate::ui::windows::upload_confirm::{self, UploadConfirmState};
 use crate::ui::windows::verify::{self, VerificationState};
+use crate::ui::windows::wan_connect::{self, WanConnectState};
 use eframe::egui;
 use p2p_core::{AppCommand, AppEvent};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use sysinfo::System;
 use tokio::sync::mpsc;
 
 /// Timeout for peer discovery - peers not seen within this time are pruned
@@ -17,6 +18,7 @@ pub struct AppUIState {
     pub show_devices: bool,
     pub show_files: bool,
     pub show_qrcode: bool,
+    pub show_wan_connect: bool,
 }
 
 struct PeerInfo {
@@ -60,6 +62,7 @@ pub struct MyApp {
     // Channels
     cmd_sender: mpsc::Sender<AppCommand>,
     event_receiver: mpsc::Receiver<AppEvent>,
+    event_sender: mpsc::Sender<AppEvent>,
 
     // App State
     ui_state: AppUIState,
@@ -85,13 +88,25 @@ pub struct MyApp {
     share_url: String,
     http_server_running: bool,
     http_server_pending: bool,
+
+    // WAN Connect
+    wan_connect_state: WanConnectState,
+    wan_service: std::sync::Arc<p2p_wan::ConnectionListener>,
+    wan_runtime: tokio::runtime::Handle,
 }
 
 impl MyApp {
-    pub fn new(tx: mpsc::Sender<AppCommand>, rx: mpsc::Receiver<AppEvent>) -> Self {
+    pub fn new(
+        tx: mpsc::Sender<AppCommand>,
+        rx: mpsc::Receiver<AppEvent>,
+        event_tx: mpsc::Sender<AppEvent>,
+        wan_service: std::sync::Arc<p2p_wan::ConnectionListener>,
+        wan_runtime: tokio::runtime::Handle,
+    ) -> Self {
         let mut app = Self {
             cmd_sender: tx,
             event_receiver: rx,
+            event_sender: event_tx,
             ui_state: AppUIState::default(),
             verification_state: VerificationState::default(),
             upload_confirm_state: UploadConfirmState::default(),
@@ -100,16 +115,15 @@ impl MyApp {
             download_path: p2p_core::config::get_download_dir(),
             local_files: Vec::new(),
             active_transfers: HashMap::new(),
-            system: System::new_with_specifics(
-                RefreshKind::nothing()
-                    .with_cpu(CpuRefreshKind::everything())
-                    .with_memory(MemoryRefreshKind::everything()),
-            ),
+            system: System::new_all(),
             last_metrics_update: Instant::now(),
             qrcode_cache: QrCodeCache::default(),
             share_url: "Server not started".to_string(),
             http_server_running: false,
             http_server_pending: false,
+            wan_connect_state: WanConnectState::default(),
+            wan_service,
+            wan_runtime,
         };
         app.refresh_local_files();
         app
@@ -157,7 +171,7 @@ impl eframe::App for MyApp {
                     });
                 }
                 AppEvent::PeerFound {
-                    peer_id: _,
+                    endpoint_id: _,
                     ip,
                     hostname,
                 } => {
@@ -338,15 +352,6 @@ impl eframe::App for MyApp {
                     received_bytes,
                     total_bytes: _,
                 } => {
-                    // Update main status log periodically or just use debug logs
-                    // For now, let's log completion only to avoid spam,
-                    // real-time progress is shown on the phone.
-                    // Or we could show a special transfer in active_transfers list?
-                    // Let's create a dummy transfer entry for visibility in GUI
-                    // self.active_transfers.entry(request_id)...?
-                    // Ideally we should track it by request_id but active_transfers uses file_name.
-                    // Let's skip detailed progress in GUI for MVP upload, rely on "UploadCompleted".
-                    // Or just log every 10%?
                     if received_bytes == 0 {
                         self.status_log.push(LogEntry {
                             message: format!("Incoming upload started..."),
@@ -363,6 +368,42 @@ impl eframe::App for MyApp {
                         log_type: LogType::Success,
                     });
                     self.refresh_local_files();
+                }
+                AppEvent::WanConnected(conn) => {
+                    self.status_log.push(LogEntry {
+                        message: format!("Connected to WAN peer: {}", conn.remote_id()),
+                        log_type: LogType::Success,
+                    });
+
+                    // Spawn connection type monitor
+                    let endpoint = self.wan_service.endpoint().clone();
+                    let peer_id = conn.remote_id();
+                    let event_tx = self.event_sender.clone();
+                    let conn_for_rtt = conn.clone();
+
+                    self.wan_runtime.spawn(async move {
+                        p2p_wan::listener::spawn_connection_monitor(
+                            endpoint,
+                            peer_id,
+                            conn_for_rtt,
+                            event_tx,
+                        )
+                        .await;
+                    });
+
+                    self.wan_connect_state.active_connection = Some(conn);
+                    self.wan_connect_state.connection_status = "Connected".to_string();
+                    self.wan_connect_state.connection_type = "Checking...".to_string();
+                }
+                AppEvent::WanConnectionInfo {
+                    connection_type,
+                    rtt_ms,
+                } => {
+                    let rtt_str = rtt_ms
+                        .map(|ms| format!(" (RTT: {}ms)", ms))
+                        .unwrap_or_default();
+                    self.wan_connect_state.connection_type =
+                        format!("{}{}", connection_type, rtt_str);
                 }
             }
         }
@@ -555,6 +596,19 @@ impl eframe::App for MyApp {
             &mut self.upload_confirm_state,
             &self.cmd_sender,
         );
+
+        // 9. Draw WAN Connect Window
+        if self.ui_state.show_wan_connect {
+            wan_connect::show(
+                ctx,
+                &mut self.ui_state.show_wan_connect,
+                &mut self.wan_connect_state,
+                &self.cmd_sender,
+                &self.event_sender,
+                &self.wan_service,
+                &self.wan_runtime,
+            );
+        }
 
         // Request repaint periodically to poll for new events from backend
         // This ensures we receive PeerFound events even when the peer list is empty

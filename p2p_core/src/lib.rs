@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 pub mod config;
 pub mod discovery;
 pub mod http_share;
+pub mod identity;
 pub mod pairing;
 pub mod transfer;
 
@@ -22,12 +23,12 @@ pub const MAGIC_BYTES: &[u8] = b"P2PLT\x00";
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DiscoveryMsg {
     DiscoveryRequest {
-        peer_id: String,
+        endpoint_id: String,
         my_name: String,
         port: u16,
     },
     DiscoveryResponse {
-        peer_id: String,
+        endpoint_id: String,
         my_name: String,
         port: u16,
     },
@@ -54,7 +55,7 @@ pub enum AppCommand {
     ///Send file to specific IP and list of files
     SendFile {
         target_ip: String,
-        target_peer_id: String,
+        target_endpoint_id: String,
         target_peer_name: String,
         files: Vec<PathBuf>,
     },
@@ -68,6 +69,8 @@ pub enum AppCommand {
     StopHttpServer,
     /// Respond to upload request from web
     RespondUploadRequest { request_id: String, accepted: bool },
+    /// Connect to a remote peer over WAN using Iroh
+    WanConnect { target_endpoint_id: String },
 }
 //Struct report from Core to GUI
 #[derive(Debug, Clone)]
@@ -75,7 +78,7 @@ pub enum AppEvent {
     Status(String),
 
     PeerFound {
-        peer_id: String,
+        endpoint_id: String,
         ip: String,
         hostname: String,
     },
@@ -160,6 +163,15 @@ pub enum AppEvent {
         file_name: String,
         saved_path: String,
     },
+
+    /// WAN Connection established
+    WanConnected(iroh::endpoint::Connection),
+
+    /// WAN Connection info update (type changed or periodic update)
+    WanConnectionInfo {
+        connection_type: String, // "Direct", "Relay", "Mixed", or "None"
+        rtt_ms: Option<u64>,     // Round-trip time in milliseconds
+    },
 }
 
 /// New Thread
@@ -169,8 +181,8 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // Install rustls crypto provider (required for rustls 0.23+)
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // 1. Get Peer ID and Hostname
-    let my_peer_id = config::get_or_create_peer_id();
+    // 1. Get Endpoint ID and Hostname (using Iroh NodeId for unified identity)
+    let my_endpoint_id = identity::get_iroh_endpoint_id();
     let my_name = hostname::get()
         .ok()
         .and_then(|s| s.into_string().ok())
@@ -182,11 +194,10 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 2. Setup Ports - use constants from discovery module
 
     // Send message to GUI
-    tracing::info!("Peer ID: {}, Name: {}", my_peer_id, my_name);
     let _ = event_tx
         .send(AppEvent::Status(format!(
-            "Peer ID: {}, Name: {}",
-            my_peer_id, my_name
+            "Endpoint ID: {}, Name: {}",
+            my_endpoint_id, my_name
         )))
         .await;
 
@@ -244,19 +255,19 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 7. Start Discovery Listening Loop
     discovery_service.start_listening(
         event_tx.clone(),
-        my_peer_id.clone(),
+        my_endpoint_id.clone(),
         my_name.clone(),
         TRANSFER_PORT,
     );
 
     // 8. Automatic Discovery Loop (Broadcast every 5 seconds)
     let ds_clone = discovery_service.clone();
-    let peer_id_clone = my_peer_id.clone();
+    let endpoint_id_clone = my_endpoint_id.clone();
     let name_clone = my_name.clone();
     tokio::spawn(async move {
         // Broadcast immediately on start
         ds_clone
-            .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), TRANSFER_PORT)
+            .send_discovery_request(endpoint_id_clone.clone(), name_clone.clone(), TRANSFER_PORT)
             .await;
 
         let mut interval =
@@ -264,7 +275,11 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         loop {
             interval.tick().await;
             ds_clone
-                .send_discovery_request(peer_id_clone.clone(), name_clone.clone(), TRANSFER_PORT)
+                .send_discovery_request(
+                    endpoint_id_clone.clone(),
+                    name_clone.clone(),
+                    TRANSFER_PORT,
+                )
                 .await;
         }
     });
@@ -282,12 +297,12 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                     .send(AppEvent::Status("Manual scanning...".to_string()))
                     .await;
                 discovery_service
-                    .send_discovery_request(my_peer_id.clone(), my_name.clone(), TRANSFER_PORT)
+                    .send_discovery_request(my_endpoint_id.clone(), my_name.clone(), TRANSFER_PORT)
                     .await;
             }
             AppCommand::SendFile {
                 target_ip,
-                target_peer_id: _target_peer_id,
+                target_endpoint_id: _target_endpoint_id,
                 target_peer_name,
                 files,
             } => {
@@ -319,7 +334,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
 
                 // Create transfer context
                 let context = transfer::TransferContext {
-                    my_peer_id: my_peer_id.clone(),
+                    my_endpoint_id: my_endpoint_id.clone(),
                     my_name: my_name.clone(),
                     target_peer_name,
                 };
@@ -462,6 +477,19 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                         .send(AppEvent::Status("HTTP server is not running".to_string()))
                         .await;
                 }
+            }
+            AppCommand::WanConnect { target_endpoint_id } => {
+                tracing::info!("=== WAN Connect Command Received ===");
+                tracing::info!("Target Endpoint ID: {}", target_endpoint_id);
+
+                // Note: Actual WAN connection is handled in p2p_gui layer
+                // which has access to p2p_wan crate
+                let _ = event_tx
+                    .send(AppEvent::Status(format!(
+                        "WAN Connect request: {}",
+                        target_endpoint_id
+                    )))
+                    .await;
             }
         }
     }

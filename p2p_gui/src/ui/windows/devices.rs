@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui_phosphor::regular::DESKTOP;
+use egui_phosphor::regular::{DESKTOP, PAPER_PLANE_RIGHT};
 use p2p_core::AppCommand;
 use tokio::sync::mpsc;
 
@@ -25,7 +25,10 @@ pub fn show(
                     ui.horizontal(|ui| {
                         ui.label(DESKTOP);
                         ui.label(peer);
-                        if ui.button("Send Files").clicked() {
+                        if ui
+                            .button(format!("{} Send Files", PAPER_PLANE_RIGHT))
+                            .clicked()
+                        {
                             let cmd_tx = cmd_tx.clone();
                             let peer_str = peer.clone();
 
@@ -42,7 +45,7 @@ pub fn show(
 
                                         let _ = cmd_tx.blocking_send(AppCommand::SendFile {
                                             target_ip: ip,
-                                            target_peer_id: String::new(),
+                                            target_endpoint_id: String::new(),
                                             target_peer_name: name,
                                             files,
                                         });

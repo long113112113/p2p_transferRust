@@ -8,12 +8,12 @@ use uuid::Uuid;
 const APP_QUALIFIER: &str = "com";
 const APP_ORGANIZATION: &str = "p2p";
 const APP_NAME: &str = "p2p_transfer";
-const PEER_ID_FILE: &str = "peer_id.txt";
+const ENDPOINT_ID_FILE: &str = "endpoint_id.txt";
 const CONFIG_FILE: &str = "config.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PairedDevice {
-    pub peer_id: String,
+    pub endpoint_id: String,
     pub peer_name: String,
     /// Unix timestamp when pairing was established
     pub paired_at: u64,
@@ -79,12 +79,12 @@ impl AppConfig {
     }
 }
 
-fn get_config_dir() -> Option<PathBuf> {
+pub fn get_config_dir() -> Option<PathBuf> {
     ProjectDirs::from(APP_QUALIFIER, APP_ORGANIZATION, APP_NAME)
         .map(|dirs| dirs.config_dir().to_path_buf())
 }
 
-pub fn get_or_create_peer_id() -> String {
+pub fn get_or_create_endpoint_id() -> String {
     let config_dir = match get_config_dir() {
         Some(dir) => dir,
         None => {
@@ -92,9 +92,9 @@ pub fn get_or_create_peer_id() -> String {
         }
     };
 
-    let peer_id_path = config_dir.join(PEER_ID_FILE);
+    let endpoint_id_path = config_dir.join(ENDPOINT_ID_FILE);
 
-    if let Ok(id) = fs::read_to_string(&peer_id_path) {
+    if let Ok(id) = fs::read_to_string(&endpoint_id_path) {
         let id = id.trim().to_string();
         if !id.is_empty() {
             return id;
@@ -108,8 +108,8 @@ pub fn get_or_create_peer_id() -> String {
         return new_id;
     }
 
-    if let Err(e) = fs::write(&peer_id_path, &new_id) {
-        eprintln!("Warning: Could not save peer ID: {}", e);
+    if let Err(e) = fs::write(&endpoint_id_path, &new_id) {
+        eprintln!("Warning: Could not save endpoint ID: {}", e);
     }
 
     new_id
@@ -120,10 +120,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_peer_id_consistency() {
-        let _id1 = get_or_create_peer_id();
-        let _id2 = get_or_create_peer_id();
+    fn test_endpoint_id_consistency() {
+        let _id1 = get_or_create_endpoint_id();
+        let _id2 = get_or_create_endpoint_id();
         // This might fail if test environment changes, but logical check
-        // assert_eq!(id1, id2, "Peer ID should be consistent across calls");
+        // assert_eq!(id1, id2, "Endpoint ID should be consistent across calls");
     }
 }

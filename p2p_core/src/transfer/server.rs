@@ -33,14 +33,17 @@ pub async fn run_server(
                             match recv_msg(&mut recv_stream).await {
                                 Ok(msg) => {
                                     match msg {
-                                        TransferMsg::PairingRequest { peer_id, peer_name } => {
+                                        TransferMsg::PairingRequest {
+                                            endpoint_id,
+                                            peer_name,
+                                        } => {
                                             // Handle Handshake
                                             if let Err(e) = handle_verification_handshake(
                                                 &mut send_stream,
                                                 &mut recv_stream,
                                                 &event_tx,
                                                 remote_addr,
-                                                peer_id,
+                                                endpoint_id,
                                                 peer_name,
                                             )
                                             .await
@@ -110,10 +113,10 @@ async fn handle_verification_handshake(
     recv: &mut quinn::RecvStream,
     event_tx: &mpsc::Sender<AppEvent>,
     remote_addr: SocketAddr,
-    peer_id: String,
+    endpoint_id: String,
     peer_name: String,
 ) -> Result<()> {
-    if pairing::is_paired(&peer_id) {
+    if pairing::is_paired(&endpoint_id) {
         send_msg(send, &TransferMsg::PairingAccepted).await?;
         let _ = event_tx
             .send(AppEvent::PairingResult {
@@ -143,7 +146,7 @@ async fn handle_verification_handshake(
             code: received_code,
         } => {
             if received_code == code {
-                pairing::add_pairing(&peer_id, &peer_name);
+                pairing::add_pairing(&endpoint_id, &peer_name);
                 send_msg(send, &TransferMsg::VerificationSuccess).await?;
                 let _ = event_tx
                     .send(AppEvent::PairingResult {

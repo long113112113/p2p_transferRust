@@ -16,7 +16,7 @@ use super::utils::report_progress;
 /// Context for file transfers containing peer information
 #[derive(Debug, Clone)]
 pub struct TransferContext {
-    pub my_peer_id: String,
+    pub my_endpoint_id: String,
     pub my_name: String,
     pub target_peer_name: String,
 }
@@ -106,7 +106,7 @@ async fn perform_verification_handshake(
     send_msg(
         send,
         &TransferMsg::PairingRequest {
-            peer_id: context.my_peer_id.clone(),
+            endpoint_id: context.my_endpoint_id.clone(),
             peer_name: context.my_name.clone(),
         },
     )
@@ -262,8 +262,8 @@ async fn send_single_file(
     // Finish stream
     send_stream.finish()?;
 
-    // Wait for receiver to confirm completion (they send this after flushing and verifying)
-    // We expect TransferComplete. If we close too early, receiver gets "Connection Lost".
+    // Wait for receiver confirmation (sent after data flush/verify)
+    // Wait for TransferComplete to avoid early connection loss.
     match recv_msg(&mut recv_stream).await {
         Ok(TransferMsg::TransferComplete) => {
             // Transfer confirmed by receiver
@@ -277,7 +277,7 @@ async fn send_single_file(
                 .await;
         }
         Err(e) => {
-            // If receiving failed, it might mean connection dropped or peer closed, which is bad at this stage
+            // Handle potential connection drop or peer closure
             let _ = event_tx
                 .send(AppEvent::Error(format!(
                     "Failed to receive completion ack: {}",
@@ -287,7 +287,7 @@ async fn send_single_file(
         }
     }
 
-    // Notify sender that file was sent and verified (we assume receiver will verify)
+    // Notify sender that transfer is complete
     let _ = event_tx
         .send(AppEvent::VerificationCompleted {
             file_name: file_name.clone(),
