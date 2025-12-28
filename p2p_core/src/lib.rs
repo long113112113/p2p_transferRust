@@ -163,6 +163,9 @@ pub enum AppEvent {
         file_name: String,
         saved_path: String,
     },
+
+    /// WAN Connection established
+    WanConnected(iroh::endpoint::Connection),
 }
 
 /// New Thread

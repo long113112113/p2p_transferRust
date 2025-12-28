@@ -378,6 +378,14 @@ impl eframe::App for MyApp {
                     });
                     self.refresh_local_files();
                 }
+                AppEvent::WanConnected(conn) => {
+                    self.status_log.push(LogEntry {
+                        message: format!("Connected to WAN peer: {}", conn.remote_id()),
+                        log_type: LogType::Success,
+                    });
+                    self.wan_connect_state.active_connection = Some(conn);
+                    self.wan_connect_state.connection_status = "Connected".to_string();
+                }
             }
         }
 

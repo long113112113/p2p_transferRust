@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use iroh::endpoint::{Incoming, TransportConfig};
-use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
+use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey, Watcher};
 use p2p_core::AppEvent;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -102,11 +102,13 @@ impl ConnectionListener {
 
                     let download_dir = self.download_dir.clone();
                     let event_tx = self.event_tx.clone();
+                    let endpoint = self.endpoint.clone();
 
                     // Spawn a task to handle this connection
                     tokio::spawn(async move {
                         if let Err(e) =
-                            Self::handle_connection(incoming, download_dir, event_tx).await
+                            Self::handle_connection(endpoint, incoming, download_dir, event_tx)
+                                .await
                         {
                             error!("Error handling connection: {}", e);
                         }
@@ -124,6 +126,7 @@ impl ConnectionListener {
 
     /// Handles an individual incoming connection
     async fn handle_connection(
+        endpoint: Endpoint,
         incoming: Incoming,
         download_dir: PathBuf,
         event_tx: mpsc::Sender<AppEvent>,
@@ -142,6 +145,14 @@ impl ConnectionListener {
                 remote_node_id
             )))
             .await;
+
+        // Spawn monitoring task
+        let monitor_tx = event_tx.clone();
+        let monitor_ep = endpoint.clone();
+        let monitor_conn = connection.clone();
+        tokio::spawn(async move {
+            monitor_connection(monitor_ep, monitor_conn, remote_node_id, monitor_tx).await;
+        });
 
         // Handle multiple file transfers on this connection
         loop {
@@ -207,5 +218,59 @@ impl ConnectionListener {
         info!("Closing listener endpoint...");
         self.endpoint.close().await;
         Ok(())
+    }
+}
+
+async fn monitor_connection(
+    endpoint: Endpoint,
+    connection: iroh::endpoint::Connection,
+    peer_id: EndpointId,
+    event_tx: mpsc::Sender<AppEvent>,
+) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+    let mut prev_stats = connection.stats();
+    let start_time = std::time::Instant::now();
+
+    loop {
+        interval.tick().await;
+
+        // Check if connection is closed
+        if connection.close_reason().is_some() {
+            break;
+        }
+
+        let stats = connection.stats();
+        let elapsed = start_time.elapsed().as_secs_f64();
+
+        // Calculate throughput
+        let tx_delta = stats.udp_tx.bytes.saturating_sub(prev_stats.udp_tx.bytes);
+        let rx_delta = stats.udp_rx.bytes.saturating_sub(prev_stats.udp_rx.bytes);
+        // Interval is 2 seconds
+        let tx_throughput = tx_delta as f64 / 2.0;
+        let rx_throughput = rx_delta as f64 / 2.0;
+
+        let mut status_msg = format!("--- Stats (t={:.1}s) ---\n", elapsed);
+
+        // Connection Type
+        if let Some(mut conn_type_watcher) = endpoint.conn_type(peer_id) {
+            let conn_type = conn_type_watcher.get();
+            status_msg.push_str(&format!("Type: {:?}\n", conn_type));
+        }
+
+        status_msg.push_str(&format!("RTT: {:?}\n", connection.rtt()));
+        status_msg.push_str(&format!(
+            "Speed: TX {:.1} KB/s, RX {:.1} KB/s\n",
+            tx_throughput / 1024.0,
+            rx_throughput / 1024.0
+        ));
+        status_msg.push_str(&format!(
+            "Path: MTU {}, CWND {}, Loss {}\n",
+            stats.path.current_mtu, stats.path.cwnd, stats.path.lost_packets
+        ));
+
+        // Send to GUI
+        let _ = event_tx.send(AppEvent::Status(status_msg)).await;
+
+        prev_stats = stats;
     }
 }

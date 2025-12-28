@@ -1,12 +1,15 @@
 use eframe::egui;
-use egui_phosphor::regular::{COPY, GLOBE, PLUGS_CONNECTED};
+use egui_phosphor::regular::{COPY, FOLDER_OPEN, GLOBE, PAPER_PLANE_RIGHT, PLUGS_CONNECTED};
 use p2p_core::{AppCommand, AppEvent};
+use std::path::PathBuf;
 use tokio::sync::mpsc;
 
 pub struct WanConnectState {
     pub target_endpoint_id: String,
     pub my_endpoint_id: String,
     pub connection_status: String,
+    pub active_connection: Option<iroh::endpoint::Connection>,
+    pub selected_files: Vec<PathBuf>,
 }
 
 impl Default for WanConnectState {
@@ -18,6 +21,8 @@ impl Default for WanConnectState {
             target_endpoint_id: String::new(),
             my_endpoint_id,
             connection_status: String::new(),
+            active_connection: None,
+            selected_files: Vec::new(),
         }
     }
 }
@@ -134,7 +139,8 @@ pub fn show(
                                             connection.remote_id()
                                         )))
                                         .await;
-                                    // TODO: Store connection for file transfer
+                                    // Store connection for file transfer
+                                    let _ = event_tx.send(AppEvent::WanConnected(connection)).await;
                                 }
                                 Err(e) => {
                                     let _ = event_tx
@@ -150,6 +156,66 @@ pub fn show(
                 if !state.connection_status.is_empty() {
                     ui.add_space(8.0);
                     ui.label(&state.connection_status);
+                }
+
+                // File Transfer Section
+                if let Some(conn) = &state.active_connection {
+                    ui.add_space(12.0);
+                    ui.separator();
+                    ui.heading("File Transfer");
+                    ui.label(format!("Connected to: {}", conn.remote_id()));
+
+                    ui.horizontal(|ui| {
+                        if ui.button(format!("{} Select Files", FOLDER_OPEN)).clicked() {
+                            if let Some(files) = rfd::FileDialog::new().pick_files() {
+                                state.selected_files = files;
+                            }
+                        }
+
+                        if !state.selected_files.is_empty() {
+                            ui.label(format!("{} files selected", state.selected_files.len()));
+                        }
+                    });
+
+                    if !state.selected_files.is_empty() {
+                        ui.add_space(5.0);
+                        // Show list of selected files (up to 3)
+                        for file in state.selected_files.iter().take(3) {
+                            if let Some(name) = file.file_name().and_then(|n| n.to_str()) {
+                                ui.label(format!("📄 {}", name));
+                            }
+                        }
+                        if state.selected_files.len() > 3 {
+                            ui.label(format!("...and {} more", state.selected_files.len() - 3));
+                        }
+
+                        ui.add_space(5.0);
+                        if ui
+                            .button(format!("{} Send Files", PAPER_PLANE_RIGHT))
+                            .clicked()
+                        {
+                            let conn_clone = conn.clone();
+                            let files = state.selected_files.clone();
+                            let event_tx = event_tx.clone();
+
+                            state.selected_files.clear(); // Clear selection after sending
+                            state.connection_status = "Sending files...".to_string();
+
+                            wan_rt.spawn(async move {
+                                if let Err(e) = p2p_wan::sender::send_files(
+                                    &conn_clone,
+                                    files,
+                                    event_tx.clone(),
+                                )
+                                .await
+                                {
+                                    let _ = event_tx
+                                        .send(AppEvent::Error(format!("WAN send error: {}", e)))
+                                        .await;
+                                }
+                            });
+                        }
+                    }
                 }
             });
         });
