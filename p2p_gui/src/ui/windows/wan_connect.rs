@@ -11,9 +11,12 @@ pub struct WanConnectState {
 
 impl Default for WanConnectState {
     fn default() -> Self {
+        // Load endpoint ID from Iroh identity
+        let my_endpoint_id = p2p_core::identity::get_iroh_endpoint_id();
+
         Self {
             target_endpoint_id: String::new(),
-            my_endpoint_id: String::new(),
+            my_endpoint_id,
             connection_status: String::new(),
         }
     }
