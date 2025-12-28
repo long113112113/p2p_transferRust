@@ -4,8 +4,33 @@ use quinn::Endpoint;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::protocol::{TransferMsg, recv_msg, send_msg};
+
+// Limit concurrent pairing attempts to prevent UI spam and brute force
+static ACTIVE_PAIRING_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+const MAX_CONCURRENT_PAIRINGS: usize = 3;
+
+struct PairingGuard;
+
+impl PairingGuard {
+    fn try_new() -> Option<Self> {
+        let count = ACTIVE_PAIRING_ATTEMPTS.fetch_add(1, Ordering::SeqCst);
+        if count >= MAX_CONCURRENT_PAIRINGS {
+            ACTIVE_PAIRING_ATTEMPTS.fetch_sub(1, Ordering::SeqCst);
+            None
+        } else {
+            Some(Self)
+        }
+    }
+}
+
+impl Drop for PairingGuard {
+    fn drop(&mut self) {
+        ACTIVE_PAIRING_ATTEMPTS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 use super::receiver::receive_file;
 
 /// Run the QUIC server to accept incoming file transfers
@@ -125,6 +150,21 @@ async fn handle_verification_handshake(
         return Ok(());
     }
 
+    // Limit concurrent pairing attempts
+    let _guard = match PairingGuard::try_new() {
+        Some(g) => g,
+        None => {
+            send_msg(
+                send,
+                &TransferMsg::VerificationFailed {
+                    message: "Too many active pairing attempts".to_string(),
+                },
+            )
+            .await?;
+            return Err(anyhow!("Too many active pairing attempts"));
+        }
+    };
+
     let code = pairing::generate_verification_code();
 
     let _ = event_tx
@@ -142,6 +182,9 @@ async fn handle_verification_handshake(
         TransferMsg::VerificationCode {
             code: received_code,
         } => {
+            // Artificial delay to prevent brute-force attacks and timing analysis
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
             if received_code == code {
                 pairing::add_pairing(&peer_id, &peer_name);
                 send_msg(send, &TransferMsg::VerificationSuccess).await?;
