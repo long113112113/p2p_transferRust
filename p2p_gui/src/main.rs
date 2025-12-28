@@ -11,7 +11,12 @@ use app::MyApp;
 
 fn main() -> Result<(), eframe::Error> {
     // 0. Initialize logging
-    tracing_subscriber::fmt::init();
+    use tracing_subscriber::{EnvFilter, fmt};
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"))
+        .add_directive("netlink_packet_route=error".parse().unwrap());
+
+    fmt::Subscriber::builder().with_env_filter(filter).init();
 
     // 1. Create channels (bounded with capacity 1000 for backpressure)
     let (tx_cmd, rx_cmd) = mpsc::channel::<AppCommand>(1000);
