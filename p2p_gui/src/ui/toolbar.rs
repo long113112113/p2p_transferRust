@@ -1,6 +1,6 @@
 use crate::app::AppUIState;
 use eframe::egui;
-use egui_phosphor::regular::{DESKTOP_TOWER, FOLDER_SIMPLE, QR_CODE};
+use egui_phosphor::regular::{DESKTOP_TOWER, FOLDER_SIMPLE, GLOBE, QR_CODE};
 
 pub fn show(ctx: &egui::Context, state: &mut AppUIState) {
     egui::SidePanel::right("right_toolbar")
@@ -16,6 +16,14 @@ pub fn show(ctx: &egui::Context, state: &mut AppUIState) {
                     .clicked()
                 {
                     state.show_devices = !state.show_devices;
+                }
+
+                // WAN Connect button
+                if ui
+                    .selectable_label(state.show_wan_connect, format!("{} WAN", GLOBE))
+                    .clicked()
+                {
+                    state.show_wan_connect = !state.show_wan_connect;
                 }
 
                 // Transfers button

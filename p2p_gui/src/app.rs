@@ -2,6 +2,7 @@ use crate::ui;
 use crate::ui::windows::qr_code::QrCodeCache;
 use crate::ui::windows::upload_confirm::{self, UploadConfirmState};
 use crate::ui::windows::verify::{self, VerificationState};
+use crate::ui::windows::wan_connect::{self, WanConnectState};
 use eframe::egui;
 use p2p_core::{AppCommand, AppEvent};
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ pub struct AppUIState {
     pub show_devices: bool,
     pub show_files: bool,
     pub show_qrcode: bool,
+    pub show_wan_connect: bool,
 }
 
 struct PeerInfo {
@@ -85,6 +87,9 @@ pub struct MyApp {
     share_url: String,
     http_server_running: bool,
     http_server_pending: bool,
+
+    // WAN Connect
+    wan_connect_state: WanConnectState,
 }
 
 impl MyApp {
@@ -110,6 +115,7 @@ impl MyApp {
             share_url: "Server not started".to_string(),
             http_server_running: false,
             http_server_pending: false,
+            wan_connect_state: WanConnectState::default(),
         };
         app.refresh_local_files();
         app
@@ -157,7 +163,7 @@ impl eframe::App for MyApp {
                     });
                 }
                 AppEvent::PeerFound {
-                    peer_id: _,
+                    endpoint_id: _,
                     ip,
                     hostname,
                 } => {
@@ -555,6 +561,16 @@ impl eframe::App for MyApp {
             &mut self.upload_confirm_state,
             &self.cmd_sender,
         );
+
+        // 9. Draw WAN Connect Window
+        if self.ui_state.show_wan_connect {
+            wan_connect::show(
+                ctx,
+                &mut self.ui_state.show_wan_connect,
+                &mut self.wan_connect_state,
+                &self.cmd_sender,
+            );
+        }
 
         // Request repaint periodically to poll for new events from backend
         // This ensures we receive PeerFound events even when the peer list is empty

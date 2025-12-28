@@ -5,15 +5,26 @@ use serde::{Deserialize, Serialize};
 /// Protocol messages for transfer handshake
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransferMsg {
-    PairingRequest { peer_id: String, peer_name: String },
+    PairingRequest {
+        endpoint_id: String,
+        peer_name: String,
+    },
     PairingAccepted,
     VerificationRequired,
-    VerificationCode { code: String },
+    VerificationCode {
+        code: String,
+    },
     VerificationSuccess,
-    VerificationFailed { message: String },
-    FileMetadata { info: FileInfo },
+    VerificationFailed {
+        message: String,
+    },
+    FileMetadata {
+        info: FileInfo,
+    },
     ReadyForData,
-    ResumeInfo { offset: u64 },
+    ResumeInfo {
+        offset: u64,
+    },
     TransferComplete,
 }
 

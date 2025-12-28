@@ -16,7 +16,7 @@ use super::utils::report_progress;
 /// Context for file transfers containing peer information
 #[derive(Debug, Clone)]
 pub struct TransferContext {
-    pub my_peer_id: String,
+    pub my_endpoint_id: String,
     pub my_name: String,
     pub target_peer_name: String,
 }
@@ -106,7 +106,7 @@ async fn perform_verification_handshake(
     send_msg(
         send,
         &TransferMsg::PairingRequest {
-            peer_id: context.my_peer_id.clone(),
+            endpoint_id: context.my_endpoint_id.clone(),
             peer_name: context.my_name.clone(),
         },
     )

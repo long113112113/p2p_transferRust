@@ -1,6 +1,6 @@
 //! Pairing management for trusted devices.
 //!
-//! Stores paired peer IDs with 24-hour expiry.
+//! Stores paired endpoint IDs with 24-hour expiry.
 
 use crate::config::{AppConfig, PairedDevice};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -16,10 +16,10 @@ fn now_timestamp() -> u64 {
         .as_secs()
 }
 
-pub fn is_paired(peer_id: &str) -> bool {
+pub fn is_paired(endpoint_id: &str) -> bool {
     let config = AppConfig::load();
 
-    if let Some(device) = config.pairing.get(peer_id) {
+    if let Some(device) = config.pairing.get(endpoint_id) {
         let now = now_timestamp();
         let elapsed = now.saturating_sub(device.paired_at);
         return elapsed < PAIRING_EXPIRY_SECS;
@@ -28,13 +28,13 @@ pub fn is_paired(peer_id: &str) -> bool {
     false
 }
 
-pub fn add_pairing(peer_id: &str, peer_name: &str) {
+pub fn add_pairing(endpoint_id: &str, peer_name: &str) {
     let mut config = AppConfig::load();
 
     config.pairing.insert(
-        peer_id.to_string(),
+        endpoint_id.to_string(),
         PairedDevice {
-            peer_id: peer_id.to_string(),
+            endpoint_id: endpoint_id.to_string(),
             peer_name: peer_name.to_string(),
             paired_at: now_timestamp(),
         },
@@ -45,9 +45,9 @@ pub fn add_pairing(peer_id: &str, peer_name: &str) {
     config.save();
 }
 
-pub fn remove_pairing(peer_id: &str) {
+pub fn remove_pairing(endpoint_id: &str) {
     let mut config = AppConfig::load();
-    config.pairing.remove(peer_id);
+    config.pairing.remove(endpoint_id);
     config.save();
 }
 
@@ -66,7 +66,7 @@ pub fn get_all_pairings() -> Vec<(String, String)> {
     config
         .pairing
         .values()
-        .map(|d| (d.peer_id.clone(), d.peer_name.clone()))
+        .map(|d| (d.endpoint_id.clone(), d.peer_name.clone()))
         .collect()
 }
 

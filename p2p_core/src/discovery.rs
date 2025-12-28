@@ -44,9 +44,9 @@ impl DiscoveryService {
     }
 
     /// Broadcast to local
-    pub async fn send_discovery_request(&self, peer_id: String, my_name: String, port: u16) {
+    pub async fn send_discovery_request(&self, endpoint_id: String, my_name: String, port: u16) {
         let msg = DiscoveryMsg::DiscoveryRequest {
-            peer_id,
+            endpoint_id,
             my_name,
             port,
         };
@@ -60,12 +60,12 @@ impl DiscoveryService {
     pub async fn send_discovery_response(
         &self,
         target: SocketAddr,
-        peer_id: String,
+        endpoint_id: String,
         my_name: String,
         port: u16,
     ) {
         let msg = DiscoveryMsg::DiscoveryResponse {
-            peer_id,
+            endpoint_id,
             my_name,
             port,
         };
@@ -78,7 +78,7 @@ impl DiscoveryService {
     pub fn start_listening(
         &self,
         event_tx: mpsc::Sender<AppEvent>,
-        my_peer_id: String,
+        my_endpoint_id: String,
         my_name: String,
         my_port: u16,
     ) {
@@ -99,14 +99,14 @@ impl DiscoveryService {
                 if let Ok(msg) = serde_json::from_slice::<DiscoveryMsg>(data) {
                     match msg {
                         DiscoveryMsg::DiscoveryRequest {
-                            peer_id: remote_peer_id,
+                            endpoint_id: remote_endpoint_id,
                             my_name: remote_name,
                             port: _remote_port,
                         } => {
                             //ignore self
-                            if remote_peer_id != my_peer_id {
+                            if remote_endpoint_id != my_endpoint_id {
                                 let response_msg = DiscoveryMsg::DiscoveryResponse {
-                                    peer_id: my_peer_id.clone(),
+                                    endpoint_id: my_endpoint_id.clone(),
                                     my_name: my_name.clone(),
                                     port: my_port,
                                 };
@@ -117,7 +117,7 @@ impl DiscoveryService {
                                 //treat this as "Peer found" immediately
                                 let _ = event_tx
                                     .send(AppEvent::PeerFound {
-                                        peer_id: remote_peer_id,
+                                        endpoint_id: remote_endpoint_id,
                                         ip: addr.ip().to_string(),
                                         hostname: remote_name,
                                     })
@@ -125,15 +125,15 @@ impl DiscoveryService {
                             }
                         }
                         DiscoveryMsg::DiscoveryResponse {
-                            peer_id: remote_peer_id,
+                            endpoint_id: remote_endpoint_id,
                             my_name: remote_name,
                             ..
                         } => {
                             //Found a peer
-                            if remote_peer_id != my_peer_id {
+                            if remote_endpoint_id != my_endpoint_id {
                                 let _ = event_tx
                                     .send(AppEvent::PeerFound {
-                                        peer_id: remote_peer_id,
+                                        endpoint_id: remote_endpoint_id,
                                         ip: addr.ip().to_string(),
                                         hostname: remote_name,
                                     })

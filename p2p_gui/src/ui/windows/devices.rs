@@ -42,7 +42,7 @@ pub fn show(
 
                                         let _ = cmd_tx.blocking_send(AppCommand::SendFile {
                                             target_ip: ip,
-                                            target_peer_id: String::new(),
+                                            target_endpoint_id: String::new(),
                                             target_peer_name: name,
                                             files,
                                         });
