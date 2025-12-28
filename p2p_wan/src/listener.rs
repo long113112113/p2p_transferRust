@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use iroh::endpoint::{Incoming, TransportConfig};
+use iroh::endpoint::Incoming;
 use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey, Watcher};
 use p2p_core::AppEvent;
 use std::path::PathBuf;
@@ -30,12 +30,7 @@ impl ConnectionListener {
     ) -> Result<Self> {
         info!("Initializing Iroh listener endpoint...");
 
-        let mut transport_config = TransportConfig::default();
-        // Set a conservative MTU to avoid WSAEMSGSIZE (10040) on some Windows networks/VPNs
-        transport_config.initial_mtu(1350);
-
         let endpoint = Endpoint::builder()
-            .transport_config(transport_config)
             .secret_key(secret_key)
             .alpns(vec![ALPN.to_vec()])
             .bind()
@@ -45,7 +40,6 @@ impl ConnectionListener {
         let node_id = endpoint.id();
         info!("Iroh endpoint initialized with Node ID: {}", node_id);
 
-        // Log some info about the endpoint
         let local_addr = endpoint.addr();
         info!("Endpoint address: {:?}", local_addr);
 

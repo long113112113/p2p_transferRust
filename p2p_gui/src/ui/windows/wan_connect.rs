@@ -1,5 +1,7 @@
 use eframe::egui;
-use egui_phosphor::regular::{COPY, FOLDER_OPEN, GLOBE, PAPER_PLANE_RIGHT, PLUGS_CONNECTED};
+use egui_phosphor::regular::{
+    CHECK_CIRCLE, COPY, FILE, FOLDER_OPEN, GLOBE, PAPER_PLANE_RIGHT, PLUGS_CONNECTED,
+};
 use p2p_core::{AppCommand, AppEvent};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -36,7 +38,7 @@ pub fn show(
     wan_service: &std::sync::Arc<p2p_wan::ConnectionListener>,
     wan_rt: &tokio::runtime::Handle,
 ) {
-    egui::Window::new(format!("{} WAN Connect", GLOBE))
+    egui::Window::new(format!("{} WAN", GLOBE))
         .open(open)
         .resizable(true)
         .default_size([350.0, 200.0])
@@ -135,7 +137,8 @@ pub fn show(
                                 Ok(connection) => {
                                     let _ = event_tx
                                         .send(AppEvent::Status(format!(
-                                            "✓ successfully connected to {}",
+                                            "{} successfully connected to {}",
+                                            CHECK_CIRCLE,
                                             connection.remote_id()
                                         )))
                                         .await;
@@ -182,7 +185,7 @@ pub fn show(
                         // Show list of selected files (up to 3)
                         for file in state.selected_files.iter().take(3) {
                             if let Some(name) = file.file_name().and_then(|n| n.to_str()) {
-                                ui.label(format!("📄 {}", name));
+                                ui.label(format!("{} {}", FILE, name));
                             }
                         }
                         if state.selected_files.len() > 3 {
@@ -198,8 +201,7 @@ pub fn show(
                             let files = state.selected_files.clone();
                             let event_tx = event_tx.clone();
 
-                            state.selected_files.clear(); // Clear selection after sending
-                            state.connection_status = "Sending files...".to_string();
+                            state.selected_files.clear();
 
                             wan_rt.spawn(async move {
                                 if let Err(e) = p2p_wan::sender::send_files(
