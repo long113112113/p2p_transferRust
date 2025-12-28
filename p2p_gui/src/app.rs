@@ -374,8 +374,36 @@ impl eframe::App for MyApp {
                         message: format!("Connected to WAN peer: {}", conn.remote_id()),
                         log_type: LogType::Success,
                     });
+
+                    // Spawn connection type monitor
+                    let endpoint = self.wan_service.endpoint().clone();
+                    let peer_id = conn.remote_id();
+                    let event_tx = self.event_sender.clone();
+                    let conn_for_rtt = conn.clone();
+
+                    self.wan_runtime.spawn(async move {
+                        p2p_wan::listener::spawn_connection_monitor(
+                            endpoint,
+                            peer_id,
+                            conn_for_rtt,
+                            event_tx,
+                        )
+                        .await;
+                    });
+
                     self.wan_connect_state.active_connection = Some(conn);
                     self.wan_connect_state.connection_status = "Connected".to_string();
+                    self.wan_connect_state.connection_type = "Checking...".to_string();
+                }
+                AppEvent::WanConnectionInfo {
+                    connection_type,
+                    rtt_ms,
+                } => {
+                    let rtt_str = rtt_ms
+                        .map(|ms| format!(" (RTT: {}ms)", ms))
+                        .unwrap_or_default();
+                    self.wan_connect_state.connection_type =
+                        format!("{}{}", connection_type, rtt_str);
                 }
             }
         }

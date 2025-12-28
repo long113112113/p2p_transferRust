@@ -166,6 +166,12 @@ pub enum AppEvent {
 
     /// WAN Connection established
     WanConnected(iroh::endpoint::Connection),
+
+    /// WAN Connection info update (type changed or periodic update)
+    WanConnectionInfo {
+        connection_type: String, // "Direct", "Relay", "Mixed", or "None"
+        rtt_ms: Option<u64>,     // Round-trip time in milliseconds
+    },
 }
 
 /// New Thread

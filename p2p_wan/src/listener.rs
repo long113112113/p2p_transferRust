@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use iroh::endpoint::Incoming;
-use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
+use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey, Watcher};
 use p2p_core::AppEvent;
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -187,5 +188,62 @@ impl ConnectionListener {
         info!("Closing listener endpoint...");
         self.endpoint.close().await;
         Ok(())
+    }
+}
+
+/// Monitor connection type (Direct/Relay) and send updates to GUI
+///
+/// This function polls for connection type changes and periodically
+/// reports the current status including RTT.
+pub async fn spawn_connection_monitor(
+    endpoint: Endpoint,
+    peer_id: EndpointId,
+    connection: iroh::endpoint::Connection,
+    event_tx: mpsc::Sender<AppEvent>,
+) {
+    info!("Starting connection monitor for peer: {}", peer_id);
+
+    let mut last_type_str = String::new();
+    let mut interval = tokio::time::interval(Duration::from_secs(3));
+
+    loop {
+        interval.tick().await;
+
+        // Get current connection type
+        if let Some(mut watcher) = endpoint.conn_type(peer_id) {
+            let conn_type = watcher.get();
+            let type_str = format!("{:?}", conn_type);
+
+            // Get RTT from connection
+            let rtt = connection.rtt();
+            let rtt_ms = Some(rtt.as_millis() as u64);
+
+            // Log when type changes
+            if type_str != last_type_str {
+                info!("Connection type changed to: {} (RTT: {:?})", type_str, rtt);
+                last_type_str = type_str.clone();
+            }
+
+            // Format connection type for display
+            let display_type = match conn_type {
+                iroh::endpoint::ConnectionType::Direct(_) => "Direct ✓".to_string(),
+                iroh::endpoint::ConnectionType::Relay(_) => "Relay".to_string(),
+                iroh::endpoint::ConnectionType::Mixed(_, _) => "Mixed".to_string(),
+                iroh::endpoint::ConnectionType::None => "None".to_string(),
+            };
+
+            let _ = event_tx
+                .send(AppEvent::WanConnectionInfo {
+                    connection_type: display_type,
+                    rtt_ms,
+                })
+                .await;
+        } else {
+            warn!(
+                "Could not get connection type watcher for peer: {}",
+                peer_id
+            );
+            break;
+        }
     }
 }

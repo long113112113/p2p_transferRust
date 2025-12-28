@@ -10,6 +10,7 @@ pub struct WanConnectState {
     pub connection_status: String,
     pub active_connection: Option<iroh::endpoint::Connection>,
     pub selected_files: Vec<PathBuf>,
+    pub connection_type: String, // "Checking...", "Direct", "Relay", etc.
 }
 
 impl Default for WanConnectState {
@@ -23,6 +24,7 @@ impl Default for WanConnectState {
             connection_status: String::new(),
             active_connection: None,
             selected_files: Vec::new(),
+            connection_type: String::new(),
         }
     }
 }
@@ -157,7 +159,28 @@ pub fn show(
                     ui.add_space(12.0);
                     ui.separator();
                     ui.heading("File Transfer");
-                    ui.label(format!("Connected to: {}", conn.remote_id()));
+
+                    // Connection info with type
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Connected to: {}", conn.remote_id()));
+                    });
+
+                    // Connection type display with color coding
+                    if !state.connection_type.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.label("Type: ");
+                            let color = if state.connection_type.contains("Direct") {
+                                egui::Color32::from_rgb(100, 200, 100) // Green
+                            } else if state.connection_type.contains("Relay") {
+                                egui::Color32::from_rgb(255, 200, 100) // Orange/Yellow
+                            } else {
+                                egui::Color32::GRAY
+                            };
+                            ui.colored_label(color, &state.connection_type);
+                        });
+                    }
+
+                    ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
                         if ui.button(format!("{} Select Files", FOLDER_OPEN)).clicked() {
