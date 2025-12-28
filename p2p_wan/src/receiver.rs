@@ -41,7 +41,7 @@ pub async fn receive_file(
     tokio::fs::create_dir_all(download_dir).await?;
     let file_path = download_dir.join(&file_name);
 
-    // Check for existing partial file (resume support)
+    // Check for existing file (resume support)
     let mut offset = 0u64;
     if file_path.exists() {
         let metadata = tokio::fs::metadata(&file_path).await?;
@@ -49,6 +49,20 @@ pub async fn receive_file(
         if current_size < file_size {
             offset = current_size;
             info!("Resuming from offset: {}", offset);
+        } else if current_size == file_size {
+            // File already complete - notify sender and skip transfer
+            info!("File already complete, skipping transfer");
+            send_msg(send, &WanTransferMsg::ResumeInfo { offset: file_size }).await?;
+            send_msg(send, &WanTransferMsg::TransferComplete).await?;
+            let _ = event_tx
+                .send(AppEvent::TransferCompleted(file_name.clone()))
+                .await;
+            return Ok(());
+        } else {
+            // File is larger than expected - delete and start fresh
+            info!("File size mismatch, restarting transfer");
+            tokio::fs::remove_file(&file_path).await?;
+            offset = 0;
         }
     }
 
@@ -80,26 +94,93 @@ pub async fn receive_file(
 
     while received < file_size {
         let to_read = std::cmp::min(BUFFER_SIZE as u64, file_size - received) as usize;
-        let n = recv.read(&mut buffer[..to_read]).await?.unwrap_or(0);
-        if n == 0 {
-            break;
-        }
+        match recv.read(&mut buffer[..to_read]).await {
+            Ok(Some(n)) => {
+                if n == 0 {
+                    // Stream closed early
+                    if received < file_size {
+                        let err_msg = format!(
+                            "Stream closed early: received {}/{} bytes",
+                            received, file_size
+                        );
+                        tracing::error!("{}", err_msg);
+                        send_msg(
+                            send,
+                            &WanTransferMsg::Error {
+                                message: err_msg.clone(),
+                            },
+                        )
+                        .await?;
+                        return Err(anyhow::anyhow!(err_msg));
+                    }
+                    break;
+                }
 
-        file.write_all(&buffer[..n]).await?;
-        received += n as u64;
+                file.write_all(&buffer[..n]).await?;
+                received += n as u64;
 
-        // Report progress every BUFFER_SIZE bytes or when complete
-        if received == file_size || received - last_progress_update >= BUFFER_SIZE as u64 {
-            last_progress_update = received;
-            report_progress(
-                event_tx, &file_name, received, file_size, start_time, offset, false,
-            )
-            .await;
+                // Report progress every BUFFER_SIZE bytes or when complete
+                if received == file_size || received - last_progress_update >= BUFFER_SIZE as u64 {
+                    last_progress_update = received;
+                    report_progress(
+                        event_tx, &file_name, received, file_size, start_time, offset, false,
+                    )
+                    .await;
+                }
+            }
+            Ok(None) => {
+                // Stream closed early
+                if received < file_size {
+                    let err_msg = format!(
+                        "Stream closed early: received {}/{} bytes",
+                        received, file_size
+                    );
+                    tracing::error!("{}", err_msg);
+                    send_msg(
+                        send,
+                        &WanTransferMsg::Error {
+                            message: err_msg.clone(),
+                        },
+                    )
+                    .await?;
+                    return Err(anyhow::anyhow!(err_msg));
+                }
+                break;
+            }
+            Err(e) => {
+                let err_msg = format!("Read error: {}", e);
+                tracing::error!("{}", err_msg);
+                send_msg(
+                    send,
+                    &WanTransferMsg::Error {
+                        message: err_msg.clone(),
+                    },
+                )
+                .await?;
+                return Err(anyhow::anyhow!(err_msg));
+            }
         }
     }
 
     // Flush file to disk
     file.flush().await?;
+
+    // Verify file size
+    if received != file_size {
+        let err_msg = format!(
+            "Incomplete transfer: received {}/{} bytes",
+            received, file_size
+        );
+        tracing::error!("{}", err_msg);
+        send_msg(
+            send,
+            &WanTransferMsg::Error {
+                message: err_msg.clone(),
+            },
+        )
+        .await?;
+        return Err(anyhow::anyhow!(err_msg));
+    }
 
     info!("File received successfully: {}", file_name);
 
