@@ -39,8 +39,6 @@ async fn main() -> Result<()> {
         tokio::signal::ctrl_c().await?;
         monitor_task.abort();
     } else {
-        // CHẾ ĐỘ SERVER: Đợi người khác kết nối tới
-        println!("\nListening on: {:?}", endpoint.addr());
 
         while let Some(connecting) = endpoint.accept().await {
             let conn = connecting.await?;

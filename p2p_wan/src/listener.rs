@@ -87,10 +87,7 @@ impl ConnectionListener {
 
         let _ = self
             .event_tx
-            .send(AppEvent::Status(format!(
-                "Listening on Node ID: {}",
-                self.node_id()
-            )))
+            .send(AppEvent::Status("WAN server listened".to_string()))
             .await;
 
         loop {

@@ -23,34 +23,43 @@ fn main() -> Result<(), eframe::Error> {
     let (tx_event, rx_event) = mpsc::channel::<AppEvent>(1000);
 
     // 1.5. Initialize WAN Service
-    let wan_runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-
-    let config_dir = p2p_core::config::get_config_dir().unwrap_or(std::path::PathBuf::from("."));
-    let download_dir = p2p_core::config::get_download_dir();
-    let identity_manager = p2p_core::identity::IdentityManager::new(config_dir);
-
     let wan_event_tx = tx_event.clone();
-    let wan_service = wan_runtime.block_on(async {
-        let secret_key = identity_manager
-            .load_or_generate()
-            .await
-            .expect("Failed to load identity");
-        p2p_wan::ConnectionListener::new(secret_key, download_dir, wan_event_tx)
-            .await
-            .expect("Failed to create WAN listener")
-    });
-    let wan_service = std::sync::Arc::new(wan_service);
 
-    // Spawn listener loop
-    let ws_clone = wan_service.clone();
-    wan_runtime.spawn(async move {
-        if let Err(e) = ws_clone.listen().await {
-            tracing::error!("WAN Listener error: {}", e);
-        }
-    });
+    // Move WAN initialization to a separate thread to avoid COM conflicts on the main thread
+    let (wan_runtime, wan_service) = thread::spawn(move || {
+        let wan_runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let config_dir =
+            p2p_core::config::get_config_dir().unwrap_or(std::path::PathBuf::from("."));
+        let download_dir = p2p_core::config::get_download_dir();
+        let identity_manager = p2p_core::identity::IdentityManager::new(config_dir);
+
+        let wan_service = wan_runtime.block_on(async {
+            let secret_key = identity_manager
+                .load_or_generate()
+                .await
+                .expect("Failed to load identity");
+            p2p_wan::ConnectionListener::new(secret_key, download_dir, wan_event_tx)
+                .await
+                .expect("Failed to create WAN listener")
+        });
+        let wan_service = std::sync::Arc::new(wan_service);
+
+        // Spawn listener loop
+        let ws_clone = wan_service.clone();
+        wan_runtime.spawn(async move {
+            if let Err(e) = ws_clone.listen().await {
+                tracing::error!("WAN Listener error: {}", e);
+            }
+        });
+
+        (wan_runtime, wan_service)
+    })
+    .join()
+    .unwrap();
 
     // 2. Spawn Backend thread
     let backend_tx_event = tx_event.clone();

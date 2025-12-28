@@ -7,7 +7,7 @@ use eframe::egui;
 use p2p_core::{AppCommand, AppEvent};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use sysinfo::System;
 use tokio::sync::mpsc;
 
 /// Timeout for peer discovery - peers not seen within this time are pruned
