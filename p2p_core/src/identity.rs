@@ -30,7 +30,6 @@ impl IdentityManager {
 
             Ok(SecretKey::from_bytes(&bytes))
         } else {
-            tracing::info!("No identity found, generating a new one...");
             let secret_key = SecretKey::generate(&mut rand::rng());
             if let Some(parent) = key_path.parent() {
                 fs::create_dir_all(parent)
@@ -59,7 +58,6 @@ impl IdentityManager {
 
             Ok(SecretKey::from_bytes(&bytes))
         } else {
-            tracing::info!("No identity found, generating a new one...");
             let secret_key = SecretKey::generate(&mut rand::rng());
             if let Some(parent) = key_path.parent() {
                 std::fs::create_dir_all(parent).context("Failed to create config directory")?;

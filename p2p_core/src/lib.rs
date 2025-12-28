@@ -183,7 +183,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 2. Setup Ports - use constants from discovery module
 
     // Send message to GUI
-    tracing::info!("Endpoint ID: {}, Name: {}", my_endpoint_id, my_name);
     let _ = event_tx
         .send(AppEvent::Status(format!(
             "Endpoint ID: {}, Name: {}",
