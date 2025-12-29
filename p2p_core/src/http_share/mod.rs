@@ -10,5 +10,5 @@ pub use server::{
     HTTP_PORT, generate_session_token, start_default_http_server_with_websocket,
     start_http_server_with_websocket,
 };
-pub use tunnel::BoreTunnel;
+pub use tunnel::NgrokTunnel;
 pub use websocket::{UploadState, respond_to_upload};

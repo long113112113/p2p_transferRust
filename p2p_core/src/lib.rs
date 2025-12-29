@@ -173,26 +173,21 @@ pub enum AppEvent {
 
     /// WAN Connection info update (type changed or periodic update)
     WanConnectionInfo {
-        connection_type: String, // "Direct", "Relay", "Mixed", or "None"
-        rtt_ms: Option<u64>,     // Round-trip time in milliseconds
+        connection_type: String,
+        rtt_ms: Option<u64>,
     },
 
-    /// WAN share tunnel is ready
     WanShareReady {
         url: String,
     },
-
-    /// WAN share tunnel stopped
     WanShareStopped,
-
-    /// WAN share tunnel error
     WanShareError(String),
 }
 
-/// New Thread
-/// cmd_rx: listent from GUI
-/// event_tx: send to GUI
 pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc::Sender<AppEvent>) {
+    // Load environment variables from .env file (for NGROK_AUTHTOKEN etc.)
+    let _ = dotenvy::dotenv();
+
     // Install rustls crypto provider (required for rustls 0.23+)
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -303,8 +298,8 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     let mut http_cancel_token: Option<CancellationToken> = None;
     let upload_state = Arc::new(http_share::UploadState::new());
 
-    // 10. WAN Share (bore tunnel) state
-    let mut bore_tunnel: Option<http_share::BoreTunnel> = None;
+    // 10. WAN Share (ngrok tunnel) state
+    let mut ngrok_tunnel: Option<http_share::NgrokTunnel> = None;
     let mut current_session_token: Option<String> = None;
 
     // Main loop: Wait for commands from UI
@@ -579,18 +574,18 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                         .await;
                 }
 
-                // Now start bore tunnel
+                // Now start ngrok tunnel
                 let session_token = current_session_token.clone().unwrap_or_default();
                 let evt = event_tx.clone();
 
-                match http_share::BoreTunnel::start(http_share::HTTP_PORT).await {
+                match http_share::NgrokTunnel::start(http_share::HTTP_PORT, &session_token).await {
                     Ok(tunnel) => {
-                        let public_url = tunnel.public_url(&session_token);
-                        bore_tunnel = Some(tunnel);
+                        let public_url = tunnel.public_url().to_string();
+                        ngrok_tunnel = Some(tunnel);
                         let _ = evt.send(AppEvent::WanShareReady { url: public_url }).await;
                     }
                     Err(e) => {
-                        tracing::error!("Failed to start bore tunnel: {}", e);
+                        tracing::error!("Failed to start ngrok tunnel: {}", e);
                         let _ = evt
                             .send(AppEvent::WanShareError(format!(
                                 "Failed to start tunnel: {}",
@@ -601,7 +596,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                 }
             }
             AppCommand::StopWanShare => {
-                if let Some(tunnel) = bore_tunnel.take() {
+                if let Some(tunnel) = ngrok_tunnel.take() {
                     tunnel.stop();
                     let _ = event_tx.send(AppEvent::WanShareStopped).await;
                     tracing::info!("WAN share tunnel stopped");

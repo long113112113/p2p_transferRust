@@ -1,88 +1,97 @@
-//! Bore tunnel for WAN access
+//! Ngrok tunnel for WAN access
 //!
-//! Provides public URL tunneling via bore.pub relay server.
+//! Provides public HTTPS URL tunneling via ngrok service.
+//! Requires NGROK_AUTHTOKEN environment variable or config file.
 
 use anyhow::Result;
-use bore_cli::client::Client;
+use ngrok::config::ForwarderBuilder;
+use ngrok::forwarder::Forwarder;
+use ngrok::tunnel::{EndpointInfo, HttpTunnel};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
-/// Default bore relay server
-pub const BORE_SERVER: &str = "bore.pub";
+/// Shared tunnel state for async access
+pub type SharedTunnel = Arc<RwLock<Option<NgrokTunnel>>>;
 
-/// Bore tunnel state
-pub struct BoreTunnel {
-    remote_port: u16,
+/// Ngrok tunnel state
+pub struct NgrokTunnel {
+    public_url: String,
     cancel_token: CancellationToken,
 }
 
-/// Shared tunnel state for async access
-pub type SharedTunnel = Arc<RwLock<Option<BoreTunnel>>>;
-
-impl BoreTunnel {
-    /// Start a new bore tunnel to the local HTTP server
+impl NgrokTunnel {
+    /// Start a new ngrok tunnel forwarding to the local HTTP server
     ///
-    /// Returns the tunnel instance with the assigned remote port.
+    /// Returns the tunnel instance with the public HTTPS URL.
     /// The tunnel runs in a background task until cancelled.
-    pub async fn start(local_port: u16) -> Result<Self> {
-        // Create bore client connecting to bore.pub
-        let client = Client::new(
-            "localhost",
-            local_port,
-            BORE_SERVER,
-            0, // 0 = random port
-            None,
-        )
-        .await?;
+    ///
+    /// Requires NGROK_AUTHTOKEN environment variable to be set.
+    pub async fn start(local_port: u16, session_token: &str) -> Result<Self> {
+        // Build ngrok session (will read NGROK_AUTHTOKEN from env)
+        let session = ngrok::Session::builder()
+            .authtoken_from_env()
+            .connect()
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to connect to ngrok: {}. Make sure NGROK_AUTHTOKEN is set.",
+                    e
+                )
+            })?;
 
-        let remote_port = client.remote_port();
+        // Create HTTP tunnel forwarding to local server
+        let local_url = format!("http://localhost:{}/{}", local_port, session_token);
+        let tunnel_builder = session.http_endpoint();
+
+        let forwarder: Forwarder<HttpTunnel> = tunnel_builder
+            .listen_and_forward(Url::parse(&local_url)?)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to start ngrok tunnel: {}", e))?;
+
+        let public_url = forwarder.url().to_string();
         let cancel_token = CancellationToken::new();
         let cancel_clone = cancel_token.clone();
 
-        // Spawn tunnel listener in background
+        tracing::info!("Ngrok tunnel started: {}", public_url);
+
+        // The forwarder runs automatically, we just need to keep it alive
         tokio::spawn(async move {
             tokio::select! {
-                result = client.listen() => {
-                    if let Err(e) = result {
-                        tracing::error!("Bore tunnel error: {}", e);
-                    }
-                }
                 _ = cancel_clone.cancelled() => {
-                    tracing::info!("Bore tunnel cancelled");
+                    tracing::info!("Ngrok tunnel cancelled");
+                    // Forwarder will be dropped here, closing the tunnel
                 }
+                _ = async {
+                    // Keep the forwarder alive
+                    loop {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                    }
+                } => {}
             }
+            drop(forwarder);
         });
 
-        tracing::info!("Bore tunnel started: {}:{}", BORE_SERVER, remote_port);
-
         Ok(Self {
-            remote_port,
+            public_url,
             cancel_token,
         })
     }
 
-    /// Get the public URL for the tunnel
-    pub fn public_url(&self, session_token: &str) -> String {
-        format!(
-            "http://{}:{}/{}",
-            BORE_SERVER, self.remote_port, session_token
-        )
-    }
-
-    /// Get the remote port
-    pub fn remote_port(&self) -> u16 {
-        self.remote_port
+    /// Get the public HTTPS URL for the tunnel
+    pub fn public_url(&self) -> &str {
+        &self.public_url
     }
 
     /// Stop the tunnel
     pub fn stop(&self) {
         self.cancel_token.cancel();
-        tracing::info!("Bore tunnel stopped");
+        tracing::info!("Ngrok tunnel stopped");
     }
 }
 
-impl Drop for BoreTunnel {
+impl Drop for NgrokTunnel {
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }

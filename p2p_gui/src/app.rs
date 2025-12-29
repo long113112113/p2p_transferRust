@@ -347,14 +347,14 @@ impl eframe::App for MyApp {
                         });
                 }
                 AppEvent::UploadRequestCancelled { request_id } => {
-                    if let UploadConfirmState::Pending(upload) = &self.upload_confirm_state {
-                        if upload.request_id == request_id {
-                            self.upload_confirm_state = UploadConfirmState::None;
-                            self.status_log.push(LogEntry {
-                                message: "Upload request cancelled".to_string(),
-                                log_type: LogType::Info,
-                            });
-                        }
+                    if let UploadConfirmState::Pending(upload) = &self.upload_confirm_state
+                        && upload.request_id == request_id
+                    {
+                        self.upload_confirm_state = UploadConfirmState::None;
+                        self.status_log.push(LogEntry {
+                            message: "Upload request cancelled".to_string(),
+                            log_type: LogType::Info,
+                        });
                     }
                 }
                 AppEvent::UploadProgress {
@@ -364,7 +364,7 @@ impl eframe::App for MyApp {
                 } => {
                     if received_bytes == 0 {
                         self.status_log.push(LogEntry {
-                            message: format!("Incoming upload started..."),
+                            message: "Incoming upload started...".to_string(),
                             log_type: LogType::Info,
                         });
                     }

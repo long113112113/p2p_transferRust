@@ -61,7 +61,7 @@ pub fn show(
                     );
 
                     if ui
-                        .button(format!("{}", COPY))
+                        .button(COPY.to_string())
                         .on_hover_text("Copy to clipboard")
                         .clicked()
                     {
@@ -86,10 +86,7 @@ pub fn show(
 
                     let can_connect = !state.target_endpoint_id.trim().is_empty();
                     if ui
-                        .add_enabled(
-                            can_connect,
-                            egui::Button::new(format!("{}", PLUGS_CONNECTED)),
-                        )
+                        .add_enabled(can_connect, egui::Button::new(PLUGS_CONNECTED.to_string()))
                         .on_hover_text("Connect")
                         .clicked()
                     {
@@ -183,10 +180,10 @@ pub fn show(
                     ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
-                        if ui.button(format!("{} Select Files", FOLDER_OPEN)).clicked() {
-                            if let Some(files) = rfd::FileDialog::new().pick_files() {
-                                state.selected_files = files;
-                            }
+                        if ui.button(format!("{} Select Files", FOLDER_OPEN)).clicked()
+                            && let Some(files) = rfd::FileDialog::new().pick_files()
+                        {
+                            state.selected_files = files;
                         }
 
                         if !state.selected_files.is_empty() {

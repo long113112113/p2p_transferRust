@@ -4,18 +4,10 @@ use qrcode::QrCode;
 use tokio::sync::mpsc;
 
 /// Cached QR code texture and the URL it was generated for
+#[derive(Default)]
 pub struct QrCodeCache {
     url: String,
     texture: Option<TextureHandle>,
-}
-
-impl Default for QrCodeCache {
-    fn default() -> Self {
-        Self {
-            url: String::new(),
-            texture: None,
-        }
-    }
 }
 
 /// Which share mode tab is selected
@@ -299,13 +291,6 @@ fn show_wan_tab(
         }
     });
 
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new("Access from anywhere via bore.pub")
-            .small()
-            .color(egui::Color32::GRAY),
-    );
-
     ui.add_space(8.0);
     ui.separator();
 
@@ -318,27 +303,20 @@ fn show_wan_tab(
             ui.add_space(40.0);
         }
     } else {
-        ui.add_space(40.0);
-        ui.label("WAN share is not active.");
+        ui.add_space(8.0);
         ui.label("Toggle the switch to create a public URL.");
         ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new("Note: Uses bore.pub relay (no HTTPS)")
-                .small()
-                .color(egui::Color32::GRAY),
-        );
-        ui.add_space(24.0);
     }
 }
 
 /// Show QR code and URL with copy button
 fn show_qr_and_url(ui: &mut egui::Ui, ctx: &egui::Context, cache: &mut QrCodeCache, url: &str) {
     // Generate or reuse cached texture
-    if cache.url != url || cache.texture.is_none() {
-        if let Some(image) = generate_qr_image(url) {
-            cache.texture = Some(ctx.load_texture("qr_code", image, TextureOptions::NEAREST));
-            cache.url = url.to_string();
-        }
+    if (cache.url != url || cache.texture.is_none())
+        && let Some(image) = generate_qr_image(url)
+    {
+        cache.texture = Some(ctx.load_texture("qr_code", image, TextureOptions::NEAREST));
+        cache.url = url.to_string();
     }
 
     // Display QR code
