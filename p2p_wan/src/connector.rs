@@ -19,20 +19,11 @@ impl Connector {
     pub async fn new(secret_key: SecretKey) -> Result<Self> {
         info!("Initializing Iroh connector endpoint...");
 
-        // Create optimized transport config for faster WAN transfer
         let mut transport_config = iroh::endpoint::TransportConfig::default();
-
-        // Increase window sizes for higher throughput (16MB each)
         transport_config.receive_window(iroh::endpoint::VarInt::from_u32(16 * 1024 * 1024));
         transport_config.send_window(16 * 1024 * 1024);
-
-        // Set safe MTU for NAT traversal
         transport_config.initial_mtu(1200);
-
-        // Increase idle timeout (convert Duration to IdleTimeout)
         transport_config.max_idle_timeout(Some(Duration::from_secs(60).try_into().unwrap()));
-
-        // Increase stream limits
         transport_config.max_concurrent_bidi_streams(iroh::endpoint::VarInt::from_u32(100));
         transport_config.max_concurrent_uni_streams(iroh::endpoint::VarInt::from_u32(100));
 
@@ -68,10 +59,6 @@ impl Connector {
     }
 
     /// Connect to a remote peer by their EndpointId
-    ///
-    /// Iroh will automatically:
-    /// - Try UDP hole punching for direct connection
-    /// - Fall back to DERP relay if direct connection fails
     pub async fn connect(&self, target_id: EndpointId) -> Result<Connection> {
         info!("=== WAN Connection Start ===");
         info!("Target Node ID: {}", target_id);

@@ -34,7 +34,6 @@ pub enum DiscoveryMsg {
     },
 }
 
-//Struct File metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
     pub file_name: String,
@@ -47,7 +46,6 @@ pub struct FileInfo {
     pub file_hash: Option<String>,
 }
 
-//Struct command from GUI to Core
 #[derive(Debug, Clone)]
 pub enum AppCommand {
     ///Broadcast LAN
@@ -76,7 +74,6 @@ pub enum AppCommand {
     /// Stop bore tunnel
     StopWanShare,
 }
-//Struct report from Core to GUI
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     Status(String),
@@ -211,7 +208,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         )))
         .await;
 
-    // 3. Init Discovery Service
     let discovery_service = match DiscoveryService::new(DISCOVERY_PORT).await {
         Ok(ds) => Arc::new(ds),
         Err(e) => {
@@ -226,7 +222,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     };
 
-    // 4. Init QUIC Server Endpoint
     let server_addr: SocketAddr = format!("0.0.0.0:{}", TRANSFER_PORT).parse().unwrap();
     let server_endpoint = match make_server_endpoint(server_addr) {
         Ok(ep) => ep,
@@ -244,7 +239,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         )))
         .await;
 
-    // 5. Init QUIC Client Endpoint
     let client_endpoint = match make_client_endpoint() {
         Ok(ep) => Arc::new(ep),
         Err(e) => {
@@ -255,14 +249,12 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     };
 
-    // 6. Start QUIC Server Loop
     let download_dir = config::get_download_dir();
     let server_event_tx = event_tx.clone();
     tokio::spawn(async move {
         transfer::run_server(server_endpoint, server_event_tx, download_dir).await;
     });
 
-    // 7. Start Discovery Listening Loop
     discovery_service.start_listening(
         event_tx.clone(),
         my_endpoint_id.clone(),
@@ -270,7 +262,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         TRANSFER_PORT,
     );
 
-    // 8. Automatic Discovery Loop (Broadcast every 5 seconds)
     let ds_clone = discovery_service.clone();
     let endpoint_id_clone = my_endpoint_id.clone();
     let name_clone = my_name.clone();

@@ -48,7 +48,6 @@ pub async fn send_files(
         handles.push(handle);
     }
 
-    // Wait for all transfers to complete
     for handle in handles {
         if let Err(e) = handle.await {
             let _ = event_tx
@@ -66,7 +65,6 @@ async fn send_single_file(
     file_path: &PathBuf,
     event_tx: &mpsc::Sender<AppEvent>,
 ) -> Result<()> {
-    // Open file and get metadata
     let mut file = File::open(file_path).await?;
     let metadata = file.metadata().await?;
     let file_size = metadata.len();
@@ -84,7 +82,6 @@ async fn send_single_file(
         )))
         .await;
 
-    // Compute file hash for verification
     let _ = event_tx
         .send(AppEvent::VerificationStarted {
             file_name: file_name.clone(),
@@ -103,14 +100,12 @@ async fn send_single_file(
         })
         .await;
 
-    // Open bidirectional stream for this file
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
 
-    // Create FileInfo and send metadata with hash
     let file_info = FileInfo {
         file_name: file_name.clone(),
         file_size,
-        file_path: PathBuf::new(), // Don't expose local path
+        file_path: PathBuf::new(),
         file_hash: Some(file_hash),
     };
 
@@ -120,7 +115,6 @@ async fn send_single_file(
     )
     .await?;
 
-    // Wait for resume info from receiver
     let msg = recv_msg(&mut recv_stream).await?;
     let offset = match msg {
         WanTransferMsg::ResumeInfo { offset } => offset,
@@ -130,13 +124,11 @@ async fn send_single_file(
         _ => return Err(anyhow!("Expected ResumeInfo, got {:?}", msg)),
     };
 
-    // Seek to offset if resuming
     if offset > 0 {
         info!("Resuming transfer from offset: {}", offset);
         file.seek(std::io::SeekFrom::Start(offset)).await?;
     }
 
-    // Transfer file data
     let mut sent: u64 = offset;
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let start_time = std::time::Instant::now();
@@ -157,7 +149,6 @@ async fn send_single_file(
         send_stream.write_all(&buffer[..n]).await?;
         sent += n as u64;
 
-        // Report progress every BUFFER_SIZE bytes or when complete
         if sent == file_size || sent - last_progress_update >= BUFFER_SIZE as u64 {
             last_progress_update = sent;
             report_progress(
@@ -167,10 +158,8 @@ async fn send_single_file(
         }
     }
 
-    // Finish stream
     send_stream.finish()?;
 
-    // Wait for receiver confirmation
     match recv_msg(&mut recv_stream).await {
         Ok(WanTransferMsg::TransferComplete) => {
             info!("File transfer confirmed: {}", file_name);

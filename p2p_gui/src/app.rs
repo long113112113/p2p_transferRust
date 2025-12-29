@@ -59,27 +59,22 @@ struct LogEntry {
 }
 
 pub struct MyApp {
-    // Channels
     cmd_sender: mpsc::Sender<AppCommand>,
     event_receiver: mpsc::Receiver<AppEvent>,
     event_sender: mpsc::Sender<AppEvent>,
 
-    // App State
     ui_state: AppUIState,
     verification_state: VerificationState,
     upload_confirm_state: UploadConfirmState,
 
-    // Data
     status_log: Vec<LogEntry>,
     // Key: IP address (unique identifier for now)
     peers: HashMap<String, PeerInfo>,
 
-    // File Management
     download_path: std::path::PathBuf,
     local_files: Vec<String>,
     active_transfers: HashMap<String, TransferState>,
 
-    // System Metrics
     system: System,
     last_metrics_update: Instant,
 
@@ -548,7 +543,6 @@ impl eframe::App for MyApp {
         // 5. Draw Bottom Status Bar (System Metrics)
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // CPU
                 let cpu_usage = self.system.global_cpu_usage();
                 ui.label(format!("CPU: {:.1}%", cpu_usage));
                 ui.add(egui::ProgressBar::new(cpu_usage / 100.0).desired_width(100.0));

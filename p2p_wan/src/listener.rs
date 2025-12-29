@@ -31,20 +31,11 @@ impl ConnectionListener {
     ) -> Result<Self> {
         info!("Initializing Iroh listener endpoint...");
 
-        // Create optimized transport config for faster WAN transfer
         let mut transport_config = iroh::endpoint::TransportConfig::default();
-
-        // Increase window sizes for higher throughput (16MB each)
         transport_config.receive_window(iroh::endpoint::VarInt::from_u32(16 * 1024 * 1024));
         transport_config.send_window(16 * 1024 * 1024);
-
-        // Set safe MTU for NAT traversal
         transport_config.initial_mtu(1200);
-
-        // Increase idle timeout (convert Duration to IdleTimeout)
         transport_config.max_idle_timeout(Some(Duration::from_secs(60).try_into().unwrap()));
-
-        // Increase stream limits
         transport_config.max_concurrent_bidi_streams(iroh::endpoint::VarInt::from_u32(100));
         transport_config.max_concurrent_uni_streams(iroh::endpoint::VarInt::from_u32(100));
 
@@ -87,7 +78,6 @@ impl ConnectionListener {
     }
 
     /// Connect to a remote peer using this endpoint
-    /// Reuse endpoint/port for both incoming and outgoing connections
     pub async fn connect(&self, node_id: EndpointId) -> Result<iroh::endpoint::Connection> {
         info!(
             "Connecting to peer {} from existing listener endpoint...",
@@ -112,7 +102,6 @@ impl ConnectionListener {
 
                     let download_dir = self.download_dir.clone();
                     let event_tx = self.event_tx.clone();
-                    // Spawn a task to handle this connection
                     tokio::spawn(async move {
                         if let Err(e) =
                             Self::handle_connection(incoming, download_dir, event_tx).await
@@ -145,14 +134,11 @@ impl ConnectionListener {
             remote_node_id
         );
 
-        // Handle multiple file transfers on this connection
         loop {
-            // Accept the next bi-directional stream (each file uses a new stream)
             match connection.accept_bi().await {
                 Ok((mut send, mut recv)) => {
                     info!("Bi-directional stream opened with: {}", remote_node_id);
 
-                    // Receive the first message which should be FileMetadata or BenchmarkStart
                     match recv_msg(&mut recv).await {
                         Ok(WanTransferMsg::FileMetadata { info }) => {
                             info!(
@@ -178,9 +164,8 @@ impl ConnectionListener {
                             info!("Benchmark started: expecting {} bytes", data_size);
                             let start = std::time::Instant::now();
 
-                            // Drain all incoming data
                             let mut received = 0u64;
-                            let mut buf = vec![0u8; 1024 * 1024]; // 1MB buffer
+                            let mut buf = vec![0u8; 1024 * 1024];
                             loop {
                                 match recv.read(&mut buf).await {
                                     Ok(Some(0)) | Ok(None) => break,
@@ -199,7 +184,6 @@ impl ConnectionListener {
                                 received, elapsed, speed_mbps
                             );
 
-                            // Send benchmark result back
                             let _ = send_msg(
                                 &mut send,
                                 &WanTransferMsg::BenchmarkComplete {
@@ -212,7 +196,6 @@ impl ConnectionListener {
                             warn!("Unexpected message: {:?}", msg);
                         }
                         Err(e) => {
-                            // Stream closed or error - this is normal when transfer is complete
                             if e.to_string().contains("closed") {
                                 info!("Stream closed by peer: {}", remote_node_id);
                             } else {
@@ -223,7 +206,6 @@ impl ConnectionListener {
                     }
                 }
                 Err(e) => {
-                    // Connection closed - this is normal after all transfers complete
                     if e.to_string().contains("closed") {
                         info!("Connection closed by peer: {}", remote_node_id);
                     } else {
@@ -245,10 +227,7 @@ impl ConnectionListener {
     }
 }
 
-/// Monitor connection type (Direct/Relay) and send updates to GUI
-///
-/// This function polls for connection type changes and periodically
-/// reports the current status including RTT.
+/// Monitor connection type and send updates to GUI
 pub async fn spawn_connection_monitor(
     endpoint: Endpoint,
     peer_id: EndpointId,
@@ -263,22 +242,18 @@ pub async fn spawn_connection_monitor(
     loop {
         interval.tick().await;
 
-        // Get current connection type
         if let Some(mut watcher) = endpoint.conn_type(peer_id) {
             let conn_type = watcher.get();
             let type_str = format!("{:?}", conn_type);
 
-            // Get RTT from connection
             let rtt = connection.rtt();
             let rtt_ms = Some(rtt.as_millis() as u64);
 
-            // Log when type changes
             if type_str != last_type_str {
                 info!("Connection type changed to: {} (RTT: {:?})", type_str, rtt);
                 last_type_str = type_str.clone();
             }
 
-            // Format connection type for display
             let display_type = match conn_type {
                 iroh::endpoint::ConnectionType::Direct(_) => "Direct ✓".to_string(),
                 iroh::endpoint::ConnectionType::Relay(_) => "Relay".to_string(),

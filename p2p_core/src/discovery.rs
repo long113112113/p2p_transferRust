@@ -43,7 +43,6 @@ impl DiscoveryService {
         })
     }
 
-    /// Broadcast to local
     pub async fn send_discovery_request(&self, endpoint_id: String, my_name: String, port: u16) {
         let msg = DiscoveryMsg::DiscoveryRequest {
             endpoint_id,
@@ -56,7 +55,6 @@ impl DiscoveryService {
         }
     }
 
-    /// Reply directly to a specific peer
     pub async fn send_discovery_response(
         &self,
         target: SocketAddr,
@@ -74,7 +72,6 @@ impl DiscoveryService {
         }
     }
 
-    /// Start listening loop
     pub fn start_listening(
         &self,
         event_tx: mpsc::Sender<AppEvent>,
@@ -89,7 +86,6 @@ impl DiscoveryService {
             while let Ok((len, addr)) = socket.recv_from(&mut buf).await {
                 // Check identify packet
                 if len < MAGIC_BYTES.len() || &buf[..MAGIC_BYTES.len()] != MAGIC_BYTES {
-                    //ignore
                     continue;
                 }
 
@@ -103,7 +99,6 @@ impl DiscoveryService {
                             my_name: remote_name,
                             port: _remote_port,
                         } => {
-                            //ignore self
                             if remote_endpoint_id != my_endpoint_id {
                                 let response_msg = DiscoveryMsg::DiscoveryResponse {
                                     endpoint_id: my_endpoint_id.clone(),
@@ -129,7 +124,6 @@ impl DiscoveryService {
                             my_name: remote_name,
                             ..
                         } => {
-                            //Found a peer
                             if remote_endpoint_id != my_endpoint_id {
                                 let _ = event_tx
                                     .send(AppEvent::PeerFound {
