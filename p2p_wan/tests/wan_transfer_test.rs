@@ -284,3 +284,198 @@ async fn test_local_endpoint_pair() -> Result<()> {
     println!("=== Local Endpoint Pair Test PASSED ===");
     Ok(())
 }
+
+/// Pure throughput benchmark - sends raw bytes without file I/O
+/// This measures the maximum theoretical throughput of the QUIC connection
+#[tokio::test]
+async fn test_wan_throughput_benchmark() -> Result<()> {
+    use std::time::Duration;
+
+    tracing_subscriber::fmt()
+        .with_env_filter("warn")
+        .try_init()
+        .ok();
+
+    println!("=== WAN Throughput Benchmark ===");
+    println!("Target EndpointID: {}", TARGET_ENDPOINT_ID);
+
+    let target_id = EndpointId::from_str(TARGET_ENDPOINT_ID)?;
+
+    // Create optimized transport config
+    let mut transport_config = iroh::endpoint::TransportConfig::default();
+    transport_config.receive_window(iroh::endpoint::VarInt::from_u32(16 * 1024 * 1024));
+    transport_config.send_window(16 * 1024 * 1024);
+    transport_config.initial_mtu(1200);
+    transport_config.max_idle_timeout(Some(Duration::from_secs(60).try_into().unwrap()));
+
+    let secret_key = SecretKey::generate(&mut rand::rng());
+    let endpoint = Endpoint::builder()
+        .secret_key(secret_key)
+        .alpns(vec![ALPN.to_vec()])
+        .transport_config(transport_config)
+        .bind()
+        .await?;
+
+    println!("Connecting...");
+    let connection = endpoint.connect(target_id, ALPN).await?;
+    println!("✓ Connected");
+
+    // Benchmark data sizes
+    let data_sizes: Vec<usize> = vec![
+        1 * 1024 * 1024,   // 1MB
+        10 * 1024 * 1024,  // 10MB
+        50 * 1024 * 1024,  // 50MB
+        100 * 1024 * 1024, // 100MB
+    ];
+
+    println!("\n{:<12} | {:<12} | {:<12}", "Size", "Time", "Speed");
+    println!("{}", "-".repeat(42));
+
+    for data_size in data_sizes {
+        // Create test data in memory (no file I/O)
+        let test_data = vec![0xABu8; data_size];
+
+        // Open stream
+        let (mut send, _recv) = connection.open_bi().await?;
+
+        // Benchmark: send raw bytes
+        let start = std::time::Instant::now();
+
+        // Send in chunks (16MB buffer)
+        const CHUNK_SIZE: usize = 16 * 1024 * 1024;
+        for chunk in test_data.chunks(CHUNK_SIZE) {
+            send.write_all(chunk).await?;
+        }
+        send.finish()?;
+
+        let elapsed = start.elapsed();
+        let speed_mbps = (data_size as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
+
+        println!(
+            "{:>10}MB | {:>10.2}s | {:>10.2} MB/s",
+            data_size / 1024 / 1024,
+            elapsed.as_secs_f64(),
+            speed_mbps
+        );
+    }
+
+    connection.close(0u8.into(), b"benchmark complete");
+    endpoint.close().await;
+
+    println!("\n=== Benchmark Complete ===");
+    Ok(())
+}
+
+/// Local throughput benchmark between two endpoints in same process
+#[tokio::test]
+async fn test_local_throughput_benchmark() -> Result<()> {
+    use std::time::Duration;
+
+    println!("=== Local Throughput Benchmark (via Relay) ===");
+
+    // Create optimized transport config
+    let create_transport_config = || {
+        let mut config = iroh::endpoint::TransportConfig::default();
+        config.receive_window(iroh::endpoint::VarInt::from_u32(16 * 1024 * 1024));
+        config.send_window(16 * 1024 * 1024);
+        config.initial_mtu(1200);
+        config.max_idle_timeout(Some(Duration::from_secs(60).try_into().unwrap()));
+        config
+    };
+
+    // Create listener
+    let listener_key = SecretKey::generate(&mut rand::rng());
+    let listener = Endpoint::builder()
+        .secret_key(listener_key)
+        .alpns(vec![ALPN.to_vec()])
+        .transport_config(create_transport_config())
+        .bind()
+        .await?;
+
+    println!("Waiting for relay...");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let listener_addr = listener.addr();
+    println!("Listener ready");
+
+    // Create connector
+    let connector_key = SecretKey::generate(&mut rand::rng());
+    let connector = Endpoint::builder()
+        .secret_key(connector_key)
+        .alpns(vec![ALPN.to_vec()])
+        .transport_config(create_transport_config())
+        .bind()
+        .await?;
+
+    // Spawn receiver task
+    let listener_clone = listener.clone();
+    let receiver_handle = tokio::spawn(async move {
+        if let Some(incoming) = listener_clone.accept().await {
+            let conn = incoming.await?;
+
+            // Accept multiple streams and drain data
+            loop {
+                match conn.accept_bi().await {
+                    Ok((mut _send, mut recv)) => {
+                        // Read all data
+                        let mut buf = vec![0u8; 1024 * 1024]; // 1MB buffer
+                        loop {
+                            match recv.read(&mut buf).await {
+                                Ok(Some(0)) | Ok(None) => break,
+                                Ok(Some(_)) => continue,
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    });
+
+    // Connect
+    println!("Connecting...");
+    let connection = connector.connect(listener_addr, ALPN).await?;
+    println!("✓ Connected");
+
+    // Benchmark
+    let data_sizes: Vec<usize> = vec![
+        1 * 1024 * 1024,  // 1MB
+        10 * 1024 * 1024, // 10MB
+        50 * 1024 * 1024, // 50MB
+    ];
+
+    println!("\n{:<12} | {:<12} | {:<12}", "Size", "Time", "Speed");
+    println!("{}", "-".repeat(42));
+
+    for data_size in data_sizes {
+        let test_data = vec![0xABu8; data_size];
+        let (mut send, _recv) = connection.open_bi().await?;
+
+        let start = std::time::Instant::now();
+
+        const CHUNK_SIZE: usize = 16 * 1024 * 1024;
+        for chunk in test_data.chunks(CHUNK_SIZE) {
+            send.write_all(chunk).await?;
+        }
+        send.finish()?;
+
+        let elapsed = start.elapsed();
+        let speed_mbps = (data_size as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
+
+        println!(
+            "{:>10}MB | {:>10.2}s | {:>10.2} MB/s",
+            data_size / 1024 / 1024,
+            elapsed.as_secs_f64(),
+            speed_mbps
+        );
+    }
+
+    connection.close(0u8.into(), b"done");
+    let _ = tokio::time::timeout(Duration::from_secs(2), receiver_handle).await;
+    listener.close().await;
+    connector.close().await;
+
+    println!("\n=== Benchmark Complete ===");
+    Ok(())
+}
