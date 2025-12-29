@@ -42,7 +42,8 @@ impl NgrokTunnel {
             })?;
 
         // Create HTTP tunnel forwarding to local server
-        let local_url = format!("http://localhost:{}/{}", local_port, session_token);
+        // Forward to the root port, as the server handles the /token logic
+        let local_url = format!("http://localhost:{}", local_port);
         let tunnel_builder = session.http_endpoint();
 
         let forwarder: Forwarder<HttpTunnel> = tunnel_builder
@@ -50,7 +51,7 @@ impl NgrokTunnel {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to start ngrok tunnel: {}", e))?;
 
-        let public_url = forwarder.url().to_string();
+        let public_url = format!("{}/{}", forwarder.url(), session_token);
         let cancel_token = CancellationToken::new();
         let cancel_clone = cancel_token.clone();
 
