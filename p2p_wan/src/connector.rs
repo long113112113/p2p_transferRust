@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
+use std::time::Duration;
 use tracing::info;
 
 use crate::protocol::ALPN;
@@ -18,9 +19,29 @@ impl Connector {
     pub async fn new(secret_key: SecretKey) -> Result<Self> {
         info!("Initializing Iroh connector endpoint...");
 
+        // Create optimized transport config for faster WAN transfer
+        let mut transport_config = iroh::endpoint::TransportConfig::default();
+
+        // Increase window sizes for higher throughput (16MB each)
+        transport_config.receive_window(iroh::endpoint::VarInt::from_u32(16 * 1024 * 1024));
+        transport_config.send_window(16 * 1024 * 1024);
+
+        // Set safe MTU for NAT traversal
+        transport_config.initial_mtu(1200);
+
+        // Increase idle timeout (convert Duration to IdleTimeout)
+        transport_config.max_idle_timeout(Some(Duration::from_secs(60).try_into().unwrap()));
+
+        // Increase stream limits
+        transport_config.max_concurrent_bidi_streams(iroh::endpoint::VarInt::from_u32(100));
+        transport_config.max_concurrent_uni_streams(iroh::endpoint::VarInt::from_u32(100));
+
+        info!("Transport config: receive_window=16MB, send_window=16MB, mtu=1200");
+
         let endpoint = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ALPN.to_vec()])
+            .transport_config(transport_config)
             .bind()
             .await
             .context("Failed to bind connector endpoint")?;
