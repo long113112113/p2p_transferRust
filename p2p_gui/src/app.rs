@@ -1,5 +1,5 @@
 use crate::ui;
-use crate::ui::windows::qr_code::QrCodeCache;
+use crate::ui::windows::qr_code::{QrCodeCache, ShareTab};
 use crate::ui::windows::upload_confirm::{self, UploadConfirmState};
 use crate::ui::windows::verify::{self, VerificationState};
 use crate::ui::windows::wan_connect::{self, WanConnectState};
@@ -59,35 +59,36 @@ struct LogEntry {
 }
 
 pub struct MyApp {
-    // Channels
     cmd_sender: mpsc::Sender<AppCommand>,
     event_receiver: mpsc::Receiver<AppEvent>,
     event_sender: mpsc::Sender<AppEvent>,
 
-    // App State
     ui_state: AppUIState,
     verification_state: VerificationState,
     upload_confirm_state: UploadConfirmState,
 
-    // Data
     status_log: Vec<LogEntry>,
     // Key: IP address (unique identifier for now)
     peers: HashMap<String, PeerInfo>,
 
-    // File Management
     download_path: std::path::PathBuf,
     local_files: Vec<String>,
     active_transfers: HashMap<String, TransferState>,
 
-    // System Metrics
     system: System,
     last_metrics_update: Instant,
 
     // QR Code & HTTP Share
     qrcode_cache: QrCodeCache,
+    share_tab: ShareTab,
     share_url: String,
     http_server_running: bool,
     http_server_pending: bool,
+
+    // WAN Share (bore tunnel)
+    wan_share_url: Option<String>,
+    wan_share_running: bool,
+    wan_share_pending: bool,
 
     // WAN Connect
     wan_connect_state: WanConnectState,
@@ -118,9 +119,13 @@ impl MyApp {
             system: System::new_all(),
             last_metrics_update: Instant::now(),
             qrcode_cache: QrCodeCache::default(),
+            share_tab: ShareTab::default(),
             share_url: "Server not started".to_string(),
             http_server_running: false,
             http_server_pending: false,
+            wan_share_url: None,
+            wan_share_running: false,
+            wan_share_pending: false,
             wan_connect_state: WanConnectState::default(),
             wan_service,
             wan_runtime,
@@ -337,14 +342,14 @@ impl eframe::App for MyApp {
                         });
                 }
                 AppEvent::UploadRequestCancelled { request_id } => {
-                    if let UploadConfirmState::Pending(upload) = &self.upload_confirm_state {
-                        if upload.request_id == request_id {
-                            self.upload_confirm_state = UploadConfirmState::None;
-                            self.status_log.push(LogEntry {
-                                message: "Upload request cancelled".to_string(),
-                                log_type: LogType::Info,
-                            });
-                        }
+                    if let UploadConfirmState::Pending(upload) = &self.upload_confirm_state
+                        && upload.request_id == request_id
+                    {
+                        self.upload_confirm_state = UploadConfirmState::None;
+                        self.status_log.push(LogEntry {
+                            message: "Upload request cancelled".to_string(),
+                            log_type: LogType::Info,
+                        });
                     }
                 }
                 AppEvent::UploadProgress {
@@ -354,7 +359,7 @@ impl eframe::App for MyApp {
                 } => {
                     if received_bytes == 0 {
                         self.status_log.push(LogEntry {
-                            message: format!("Incoming upload started..."),
+                            message: "Incoming upload started...".to_string(),
                             log_type: LogType::Info,
                         });
                     }
@@ -404,6 +409,32 @@ impl eframe::App for MyApp {
                         .unwrap_or_default();
                     self.wan_connect_state.connection_type =
                         format!("{}{}", connection_type, rtt_str);
+                }
+                AppEvent::WanShareReady { url } => {
+                    self.wan_share_url = Some(url.clone());
+                    self.wan_share_running = true;
+                    self.wan_share_pending = false;
+                    self.qrcode_cache = QrCodeCache::default();
+                    self.status_log.push(LogEntry {
+                        message: format!("WAN share ready: {}", url),
+                        log_type: LogType::Success,
+                    });
+                }
+                AppEvent::WanShareStopped => {
+                    self.wan_share_url = None;
+                    self.wan_share_running = false;
+                    self.wan_share_pending = false;
+                    self.status_log.push(LogEntry {
+                        message: "WAN share stopped".to_string(),
+                        log_type: LogType::Info,
+                    });
+                }
+                AppEvent::WanShareError(msg) => {
+                    self.wan_share_pending = false;
+                    self.status_log.push(LogEntry {
+                        message: format!("[WAN Share Error] {}", msg),
+                        log_type: LogType::Error,
+                    });
                 }
             }
         }
@@ -512,7 +543,6 @@ impl eframe::App for MyApp {
         // 5. Draw Bottom Status Bar (System Metrics)
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // CPU
                 let cpu_usage = self.system.global_cpu_usage();
                 ui.label(format!("CPU: {:.1}%", cpu_usage));
                 ui.add(egui::ProgressBar::new(cpu_usage / 100.0).desired_width(100.0));
@@ -580,9 +610,15 @@ impl eframe::App for MyApp {
                 ctx,
                 &mut self.ui_state.show_qrcode,
                 &mut self.qrcode_cache,
+                &mut self.share_tab,
+                // LAN
                 &self.share_url,
                 self.http_server_running,
                 &mut self.http_server_pending,
+                // WAN
+                self.wan_share_url.as_deref(),
+                self.wan_share_running,
+                &mut self.wan_share_pending,
                 &self.cmd_sender,
             );
         }

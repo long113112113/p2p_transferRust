@@ -10,14 +10,13 @@ pub async fn wait_for_file_info(
     receiver: &mut futures_util::stream::SplitStream<WebSocket>,
 ) -> Option<(String, u64)> {
     while let Some(msg) = receiver.next().await {
-        if let Ok(Message::Text(text)) = msg {
-            if let Ok(ClientMessage::FileInfo {
+        if let Ok(Message::Text(text)) = msg
+            && let Ok(ClientMessage::FileInfo {
                 file_name,
                 file_size,
             }) = serde_json::from_str(&text)
-            {
-                return Some((file_name, file_size));
-            }
+        {
+            return Some((file_name, file_size));
         }
     }
     None

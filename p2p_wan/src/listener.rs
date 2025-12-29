@@ -31,9 +31,20 @@ impl ConnectionListener {
     ) -> Result<Self> {
         info!("Initializing Iroh listener endpoint...");
 
+        let mut transport_config = iroh::endpoint::TransportConfig::default();
+        transport_config.receive_window(iroh::endpoint::VarInt::from_u32(16 * 1024 * 1024));
+        transport_config.send_window(16 * 1024 * 1024);
+        transport_config.initial_mtu(1200);
+        transport_config.max_idle_timeout(Some(Duration::from_secs(60).try_into().unwrap()));
+        transport_config.max_concurrent_bidi_streams(iroh::endpoint::VarInt::from_u32(100));
+        transport_config.max_concurrent_uni_streams(iroh::endpoint::VarInt::from_u32(100));
+
+        info!("Transport config: receive_window=16MB, send_window=16MB, mtu=1200");
+
         let endpoint = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ALPN.to_vec()])
+            .transport_config(transport_config)
             .bind()
             .await
             .context("Failed to bind endpoint")?;
@@ -67,7 +78,6 @@ impl ConnectionListener {
     }
 
     /// Connect to a remote peer using this endpoint
-    /// Reuse endpoint/port for both incoming and outgoing connections
     pub async fn connect(&self, node_id: EndpointId) -> Result<iroh::endpoint::Connection> {
         info!(
             "Connecting to peer {} from existing listener endpoint...",
@@ -92,7 +102,6 @@ impl ConnectionListener {
 
                     let download_dir = self.download_dir.clone();
                     let event_tx = self.event_tx.clone();
-                    // Spawn a task to handle this connection
                     tokio::spawn(async move {
                         if let Err(e) =
                             Self::handle_connection(incoming, download_dir, event_tx).await
@@ -125,14 +134,11 @@ impl ConnectionListener {
             remote_node_id
         );
 
-        // Handle multiple file transfers on this connection
         loop {
-            // Accept the next bi-directional stream (each file uses a new stream)
             match connection.accept_bi().await {
                 Ok((mut send, mut recv)) => {
                     info!("Bi-directional stream opened with: {}", remote_node_id);
 
-                    // Receive the first message which should be FileMetadata
                     match recv_msg(&mut recv).await {
                         Ok(WanTransferMsg::FileMetadata { info }) => {
                             info!(
@@ -154,11 +160,42 @@ impl ConnectionListener {
                                 .await;
                             }
                         }
+                        Ok(WanTransferMsg::BenchmarkStart { data_size }) => {
+                            info!("Benchmark started: expecting {} bytes", data_size);
+                            let start = std::time::Instant::now();
+
+                            let mut received = 0u64;
+                            let mut buf = vec![0u8; 1024 * 1024];
+                            loop {
+                                match recv.read(&mut buf).await {
+                                    Ok(Some(0)) | Ok(None) => break,
+                                    Ok(Some(n)) => {
+                                        received += n as u64;
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+
+                            let elapsed = start.elapsed();
+                            let speed_mbps =
+                                (received as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
+                            info!(
+                                "Benchmark complete: {} bytes in {:?} ({:.2} MB/s)",
+                                received, elapsed, speed_mbps
+                            );
+
+                            let _ = send_msg(
+                                &mut send,
+                                &WanTransferMsg::BenchmarkComplete {
+                                    elapsed_ms: elapsed.as_millis() as u64,
+                                },
+                            )
+                            .await;
+                        }
                         Ok(msg) => {
                             warn!("Unexpected message: {:?}", msg);
                         }
                         Err(e) => {
-                            // Stream closed or error - this is normal when transfer is complete
                             if e.to_string().contains("closed") {
                                 info!("Stream closed by peer: {}", remote_node_id);
                             } else {
@@ -169,7 +206,6 @@ impl ConnectionListener {
                     }
                 }
                 Err(e) => {
-                    // Connection closed - this is normal after all transfers complete
                     if e.to_string().contains("closed") {
                         info!("Connection closed by peer: {}", remote_node_id);
                     } else {
@@ -191,10 +227,7 @@ impl ConnectionListener {
     }
 }
 
-/// Monitor connection type (Direct/Relay) and send updates to GUI
-///
-/// This function polls for connection type changes and periodically
-/// reports the current status including RTT.
+/// Monitor connection type and send updates to GUI
 pub async fn spawn_connection_monitor(
     endpoint: Endpoint,
     peer_id: EndpointId,
@@ -209,22 +242,18 @@ pub async fn spawn_connection_monitor(
     loop {
         interval.tick().await;
 
-        // Get current connection type
         if let Some(mut watcher) = endpoint.conn_type(peer_id) {
             let conn_type = watcher.get();
             let type_str = format!("{:?}", conn_type);
 
-            // Get RTT from connection
             let rtt = connection.rtt();
             let rtt_ms = Some(rtt.as_millis() as u64);
 
-            // Log when type changes
             if type_str != last_type_str {
                 info!("Connection type changed to: {} (RTT: {:?})", type_str, rtt);
                 last_type_str = type_str.clone();
             }
 
-            // Format connection type for display
             let display_type = match conn_type {
                 iroh::endpoint::ConnectionType::Direct(_) => "Direct ✓".to_string(),
                 iroh::endpoint::ConnectionType::Relay(_) => "Relay".to_string(),

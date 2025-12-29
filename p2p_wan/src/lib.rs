@@ -5,7 +5,6 @@ pub mod protocol;
 pub mod receiver;
 pub mod sender;
 
-// Re-exports for convenience
 pub use connector::Connector;
 pub use identity::IdentityManager;
 pub use listener::ConnectionListener;

@@ -34,7 +34,6 @@ pub enum DiscoveryMsg {
     },
 }
 
-//Struct File metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
     pub file_name: String,
@@ -47,7 +46,6 @@ pub struct FileInfo {
     pub file_hash: Option<String>,
 }
 
-//Struct command from GUI to Core
 #[derive(Debug, Clone)]
 pub enum AppCommand {
     ///Broadcast LAN
@@ -71,8 +69,11 @@ pub enum AppCommand {
     RespondUploadRequest { request_id: String, accepted: bool },
     /// Connect to a remote peer over WAN using Iroh
     WanConnect { target_endpoint_id: String },
+    /// Start bore tunnel for WAN HTTP share
+    StartWanShare,
+    /// Stop bore tunnel
+    StopWanShare,
 }
-//Struct report from Core to GUI
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     Status(String),
@@ -169,15 +170,21 @@ pub enum AppEvent {
 
     /// WAN Connection info update (type changed or periodic update)
     WanConnectionInfo {
-        connection_type: String, // "Direct", "Relay", "Mixed", or "None"
-        rtt_ms: Option<u64>,     // Round-trip time in milliseconds
+        connection_type: String,
+        rtt_ms: Option<u64>,
     },
+
+    WanShareReady {
+        url: String,
+    },
+    WanShareStopped,
+    WanShareError(String),
 }
 
-/// New Thread
-/// cmd_rx: listent from GUI
-/// event_tx: send to GUI
 pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc::Sender<AppEvent>) {
+    // Load environment variables from .env file (for NGROK_AUTHTOKEN etc.)
+    let _ = dotenvy::dotenv();
+
     // Install rustls crypto provider (required for rustls 0.23+)
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -201,7 +208,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         )))
         .await;
 
-    // 3. Init Discovery Service
     let discovery_service = match DiscoveryService::new(DISCOVERY_PORT).await {
         Ok(ds) => Arc::new(ds),
         Err(e) => {
@@ -216,7 +222,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     };
 
-    // 4. Init QUIC Server Endpoint
     let server_addr: SocketAddr = format!("0.0.0.0:{}", TRANSFER_PORT).parse().unwrap();
     let server_endpoint = match make_server_endpoint(server_addr) {
         Ok(ep) => ep,
@@ -234,7 +239,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         )))
         .await;
 
-    // 5. Init QUIC Client Endpoint
     let client_endpoint = match make_client_endpoint() {
         Ok(ep) => Arc::new(ep),
         Err(e) => {
@@ -245,14 +249,12 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         }
     };
 
-    // 6. Start QUIC Server Loop
     let download_dir = config::get_download_dir();
     let server_event_tx = event_tx.clone();
     tokio::spawn(async move {
         transfer::run_server(server_endpoint, server_event_tx, download_dir).await;
     });
 
-    // 7. Start Discovery Listening Loop
     discovery_service.start_listening(
         event_tx.clone(),
         my_endpoint_id.clone(),
@@ -260,7 +262,6 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
         TRANSFER_PORT,
     );
 
-    // 8. Automatic Discovery Loop (Broadcast every 5 seconds)
     let ds_clone = discovery_service.clone();
     let endpoint_id_clone = my_endpoint_id.clone();
     let name_clone = my_name.clone();
@@ -287,6 +288,10 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 9. HTTP Server state
     let mut http_cancel_token: Option<CancellationToken> = None;
     let upload_state = Arc::new(http_share::UploadState::new());
+
+    // 10. WAN Share (ngrok tunnel) state
+    let mut ngrok_tunnel: Option<http_share::NgrokTunnel> = None;
+    let mut current_session_token: Option<String> = None;
 
     // Main loop: Wait for commands from UI
     while let Some(cmd) = cmd_rx.recv().await {
@@ -439,6 +444,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
 
                 let cancel_token = CancellationToken::new();
                 http_cancel_token = Some(cancel_token.clone());
+                current_session_token = Some(session_token.clone());
 
                 let http_event_tx = event_tx.clone();
                 let token_clone = session_token.clone();
@@ -490,6 +496,106 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                         target_endpoint_id
                     )))
                     .await;
+            }
+            AppCommand::StartWanShare => {
+                // First ensure HTTP server is running
+                if http_cancel_token.is_none() {
+                    // Start HTTP server first
+                    let session_token = http_share::generate_session_token();
+                    let local_ip = local_ip_address::list_afinet_netifas()
+                        .ok()
+                        .and_then(|ips| {
+                            let mut best_ip = None;
+                            for (_name, ip) in ips {
+                                if ip.is_loopback() || !ip.is_ipv4() {
+                                    continue;
+                                }
+                                let ip_str = ip.to_string();
+                                if ip_str.starts_with("192.168.") {
+                                    return Some(ip_str);
+                                }
+                                if ip_str.starts_with("10.") {
+                                    best_ip = Some(ip_str);
+                                    continue;
+                                }
+                                if ip_str.starts_with("172.") && best_ip.is_none() {
+                                    best_ip = Some(ip_str);
+                                    continue;
+                                }
+                                if best_ip.is_none() {
+                                    best_ip = Some(ip_str);
+                                }
+                            }
+                            best_ip
+                        })
+                        .unwrap_or_else(|| "127.0.0.1".to_string());
+                    let share_url = format!(
+                        "http://{}:{}/{}",
+                        local_ip,
+                        http_share::HTTP_PORT,
+                        session_token
+                    );
+
+                    let cancel_token = CancellationToken::new();
+                    http_cancel_token = Some(cancel_token.clone());
+                    current_session_token = Some(session_token.clone());
+
+                    let http_event_tx = event_tx.clone();
+                    let token_clone = session_token.clone();
+                    let upload_state_clone = upload_state.clone();
+
+                    tokio::spawn(async move {
+                        if let Err(e) = http_share::start_default_http_server_with_websocket(
+                            &token_clone,
+                            http_event_tx.clone(),
+                            upload_state_clone,
+                            Some(cancel_token),
+                        )
+                        .await
+                        {
+                            tracing::error!("HTTP server error: {}", e);
+                            let _ = http_event_tx
+                                .send(AppEvent::Error(format!("HTTP server failed: {}", e)))
+                                .await;
+                        }
+                    });
+
+                    let _ = event_tx
+                        .send(AppEvent::HttpServerStarted { url: share_url })
+                        .await;
+                }
+
+                // Now start ngrok tunnel
+                let session_token = current_session_token.clone().unwrap_or_default();
+                let evt = event_tx.clone();
+
+                match http_share::NgrokTunnel::start(http_share::HTTP_PORT, &session_token).await {
+                    Ok(tunnel) => {
+                        let public_url = tunnel.public_url().to_string();
+                        ngrok_tunnel = Some(tunnel);
+                        let _ = evt.send(AppEvent::WanShareReady { url: public_url }).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to start ngrok tunnel: {}", e);
+                        let _ = evt
+                            .send(AppEvent::WanShareError(format!(
+                                "Failed to start tunnel: {}",
+                                e
+                            )))
+                            .await;
+                    }
+                }
+            }
+            AppCommand::StopWanShare => {
+                if let Some(tunnel) = ngrok_tunnel.take() {
+                    tunnel.stop();
+                    let _ = event_tx.send(AppEvent::WanShareStopped).await;
+                    tracing::info!("WAN share tunnel stopped");
+                } else {
+                    let _ = event_tx
+                        .send(AppEvent::Status("WAN share is not running".to_string()))
+                        .await;
+                }
             }
         }
     }
