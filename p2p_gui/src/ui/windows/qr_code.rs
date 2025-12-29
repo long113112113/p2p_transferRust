@@ -18,6 +18,14 @@ impl Default for QrCodeCache {
     }
 }
 
+/// Which share mode tab is selected
+#[derive(Default, Clone, Copy, PartialEq)]
+pub enum ShareTab {
+    #[default]
+    Lan,
+    Wan,
+}
+
 /// Generate a QR code image from URL string
 fn generate_qr_image(url: &str) -> Option<ColorImage> {
     let code = QrCode::new(url.as_bytes()).ok()?;
@@ -109,106 +117,257 @@ fn toggle_ui(ui: &mut egui::Ui, on: &mut bool, enabled: bool) -> egui::Response 
     response
 }
 
-/// Show the QR code window with a dynamic URL and server toggle
+/// Show the QR code window with LAN and WAN tabs
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ctx: &egui::Context,
     open: &mut bool,
     cache: &mut QrCodeCache,
-    url: &str,
-    server_running: bool,
-    server_pending: &mut bool,
+    selected_tab: &mut ShareTab,
+    // LAN share state
+    lan_url: &str,
+    lan_server_running: bool,
+    lan_server_pending: &mut bool,
+    // WAN share state
+    wan_url: Option<&str>,
+    wan_share_running: bool,
+    wan_share_pending: &mut bool,
+    // Command sender
     cmd_sender: &mpsc::Sender<AppCommand>,
 ) {
-    // We need a local mutable copy for the toggle
-    let mut toggle_state = server_running;
-
-    egui::Window::new("QR Code")
+    egui::Window::new("QR Code Share")
         .open(open)
         .resizable(false)
         .collapsible(false)
-        .default_size([300.0, 400.0])
+        .default_size([320.0, 450.0])
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.add_space(8.0);
-
-                // Server toggle with label
+                // Tab selector
                 ui.horizontal(|ui| {
-                    let status_text = if *server_pending {
-                        if server_running {
-                            format!("{} Stopping...", egui_phosphor::regular::SPINNER)
-                        } else {
-                            format!("{} Starting...", egui_phosphor::regular::SPINNER)
-                        }
-                    } else if server_running {
-                        format!("{} Server ON", egui_phosphor::regular::GLOBE)
-                    } else {
-                        format!("{} Server OFF", egui_phosphor::regular::GLOBE)
-                    };
-
-                    ui.label(status_text);
-                    ui.add_space(8.0);
-
-                    // Toggle is disabled when pending
-                    let toggle_enabled = !*server_pending;
-                    let response = toggle_ui(ui, &mut toggle_state, toggle_enabled);
-
-                    // If toggle was clicked and state changed, send command
-                    if response.changed() {
-                        *server_pending = true;
-                        if toggle_state {
-                            let _ = cmd_sender.try_send(AppCommand::StartHttpServer);
-                        } else {
-                            let _ = cmd_sender.try_send(AppCommand::StopHttpServer);
-                        }
+                    if ui
+                        .selectable_label(
+                            *selected_tab == ShareTab::Lan,
+                            format!("{} LAN", egui_phosphor::regular::WIFI_HIGH),
+                        )
+                        .clicked()
+                    {
+                        *selected_tab = ShareTab::Lan;
+                        *cache = QrCodeCache::default();
+                    }
+                    ui.separator();
+                    if ui
+                        .selectable_label(
+                            *selected_tab == ShareTab::Wan,
+                            format!("{} WAN", egui_phosphor::regular::GLOBE),
+                        )
+                        .clicked()
+                    {
+                        *selected_tab = ShareTab::Wan;
+                        *cache = QrCodeCache::default();
                     }
                 });
 
                 ui.add_space(8.0);
                 ui.separator();
 
-                if server_running {
-                    // Generate or reuse cached texture
-                    if cache.url != url || cache.texture.is_none() {
-                        if let Some(image) = generate_qr_image(url) {
-                            cache.texture = Some(ui.ctx().load_texture(
-                                "qr_code",
-                                image,
-                                TextureOptions::NEAREST,
-                            ));
-                            cache.url = url.to_string();
-                        }
+                match selected_tab {
+                    ShareTab::Lan => {
+                        show_lan_tab(
+                            ui,
+                            ctx,
+                            cache,
+                            lan_url,
+                            lan_server_running,
+                            lan_server_pending,
+                            cmd_sender,
+                        );
                     }
-
-                    // Display QR code
-                    if let Some(texture) = &cache.texture {
-                        let size = egui::vec2(250.0, 250.0);
-                        ui.image((texture.id(), size));
-                    } else {
-                        ui.label("Failed to generate QR code");
+                    ShareTab::Wan => {
+                        show_wan_tab(
+                            ui,
+                            ctx,
+                            cache,
+                            wan_url,
+                            wan_share_running,
+                            wan_share_pending,
+                            cmd_sender,
+                        );
                     }
-
-                    ui.add_space(8.0);
-                    ui.separator();
-
-                    // Show the URL
-                    ui.horizontal(|ui| {
-                        ui.label("URL:");
-                        ui.monospace(url);
-                    });
-
-                    // Copy button
-                    if ui
-                        .button(format!("{} Copy URL", egui_phosphor::regular::CLIPBOARD))
-                        .clicked()
-                    {
-                        ctx.copy_text(url.to_string());
-                    }
-                } else {
-                    ui.add_space(40.0);
-                    ui.label("Server is not running.");
-                    ui.label("Toggle the switch to start the server.");
-                    ui.add_space(40.0);
                 }
             });
         });
+}
+
+/// Show LAN share tab content
+fn show_lan_tab(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    cache: &mut QrCodeCache,
+    url: &str,
+    server_running: bool,
+    server_pending: &mut bool,
+    cmd_sender: &mpsc::Sender<AppCommand>,
+) {
+    let mut toggle_state = server_running;
+
+    ui.add_space(8.0);
+
+    // Server toggle with label
+    ui.horizontal(|ui| {
+        let status_text = if *server_pending {
+            if server_running {
+                format!("{} Stopping...", egui_phosphor::regular::SPINNER)
+            } else {
+                format!("{} Starting...", egui_phosphor::regular::SPINNER)
+            }
+        } else if server_running {
+            format!("{} LAN Server ON", egui_phosphor::regular::WIFI_HIGH)
+        } else {
+            format!("{} LAN Server OFF", egui_phosphor::regular::WIFI_SLASH)
+        };
+
+        ui.label(status_text);
+        ui.add_space(8.0);
+
+        let toggle_enabled = !*server_pending;
+        let response = toggle_ui(ui, &mut toggle_state, toggle_enabled);
+
+        if response.changed() {
+            *server_pending = true;
+            if toggle_state {
+                let _ = cmd_sender.try_send(AppCommand::StartHttpServer);
+            } else {
+                let _ = cmd_sender.try_send(AppCommand::StopHttpServer);
+            }
+        }
+    });
+
+    ui.add_space(8.0);
+    ui.separator();
+
+    if server_running {
+        show_qr_and_url(ui, ctx, cache, url);
+    } else {
+        ui.add_space(40.0);
+        ui.label("LAN server is not running.");
+        ui.label("Toggle the switch to start sharing.");
+        ui.add_space(40.0);
+    }
+}
+
+/// Show WAN share tab content
+fn show_wan_tab(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    cache: &mut QrCodeCache,
+    wan_url: Option<&str>,
+    wan_running: bool,
+    wan_pending: &mut bool,
+    cmd_sender: &mpsc::Sender<AppCommand>,
+) {
+    let mut toggle_state = wan_running;
+
+    ui.add_space(8.0);
+
+    // WAN toggle with label
+    ui.horizontal(|ui| {
+        let status_text = if *wan_pending {
+            if wan_running {
+                format!("{} Stopping...", egui_phosphor::regular::SPINNER)
+            } else {
+                format!("{} Connecting...", egui_phosphor::regular::SPINNER)
+            }
+        } else if wan_running {
+            format!("{} WAN Share ON", egui_phosphor::regular::GLOBE)
+        } else {
+            format!("{} WAN Share OFF", egui_phosphor::regular::GLOBE_X)
+        };
+
+        ui.label(status_text);
+        ui.add_space(8.0);
+
+        let toggle_enabled = !*wan_pending;
+        let response = toggle_ui(ui, &mut toggle_state, toggle_enabled);
+
+        if response.changed() {
+            *wan_pending = true;
+            if toggle_state {
+                let _ = cmd_sender.try_send(AppCommand::StartWanShare);
+            } else {
+                let _ = cmd_sender.try_send(AppCommand::StopWanShare);
+            }
+        }
+    });
+
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new("Access from anywhere via bore.pub")
+            .small()
+            .color(egui::Color32::GRAY),
+    );
+
+    ui.add_space(8.0);
+    ui.separator();
+
+    if wan_running {
+        if let Some(url) = wan_url {
+            show_qr_and_url(ui, ctx, cache, url);
+        } else {
+            ui.add_space(40.0);
+            ui.label("Waiting for tunnel...");
+            ui.add_space(40.0);
+        }
+    } else {
+        ui.add_space(40.0);
+        ui.label("WAN share is not active.");
+        ui.label("Toggle the switch to create a public URL.");
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new("Note: Uses bore.pub relay (no HTTPS)")
+                .small()
+                .color(egui::Color32::GRAY),
+        );
+        ui.add_space(24.0);
+    }
+}
+
+/// Show QR code and URL with copy button
+fn show_qr_and_url(ui: &mut egui::Ui, ctx: &egui::Context, cache: &mut QrCodeCache, url: &str) {
+    // Generate or reuse cached texture
+    if cache.url != url || cache.texture.is_none() {
+        if let Some(image) = generate_qr_image(url) {
+            cache.texture = Some(ctx.load_texture("qr_code", image, TextureOptions::NEAREST));
+            cache.url = url.to_string();
+        }
+    }
+
+    // Display QR code
+    if let Some(texture) = &cache.texture {
+        let size = egui::vec2(220.0, 220.0);
+        ui.image((texture.id(), size));
+    } else {
+        ui.label("Failed to generate QR code");
+    }
+
+    ui.add_space(8.0);
+    ui.separator();
+
+    // Show the URL (truncated if too long)
+    ui.horizontal(|ui| {
+        ui.label("URL:");
+        let display_url = if url.len() > 35 {
+            format!("{}...", &url[..32])
+        } else {
+            url.to_string()
+        };
+        ui.monospace(display_url).on_hover_text(url);
+    });
+
+    // Copy button
+    if ui
+        .button(format!("{} Copy URL", egui_phosphor::regular::CLIPBOARD))
+        .clicked()
+    {
+        ctx.copy_text(url.to_string());
+    }
 }

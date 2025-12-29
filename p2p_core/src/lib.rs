@@ -71,6 +71,10 @@ pub enum AppCommand {
     RespondUploadRequest { request_id: String, accepted: bool },
     /// Connect to a remote peer over WAN using Iroh
     WanConnect { target_endpoint_id: String },
+    /// Start bore tunnel for WAN HTTP share
+    StartWanShare,
+    /// Stop bore tunnel
+    StopWanShare,
 }
 //Struct report from Core to GUI
 #[derive(Debug, Clone)]
@@ -172,6 +176,17 @@ pub enum AppEvent {
         connection_type: String, // "Direct", "Relay", "Mixed", or "None"
         rtt_ms: Option<u64>,     // Round-trip time in milliseconds
     },
+
+    /// WAN share tunnel is ready
+    WanShareReady {
+        url: String,
+    },
+
+    /// WAN share tunnel stopped
+    WanShareStopped,
+
+    /// WAN share tunnel error
+    WanShareError(String),
 }
 
 /// New Thread
@@ -287,6 +302,10 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
     // 9. HTTP Server state
     let mut http_cancel_token: Option<CancellationToken> = None;
     let upload_state = Arc::new(http_share::UploadState::new());
+
+    // 10. WAN Share (bore tunnel) state
+    let mut bore_tunnel: Option<http_share::BoreTunnel> = None;
+    let mut current_session_token: Option<String> = None;
 
     // Main loop: Wait for commands from UI
     while let Some(cmd) = cmd_rx.recv().await {
@@ -439,6 +458,7 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
 
                 let cancel_token = CancellationToken::new();
                 http_cancel_token = Some(cancel_token.clone());
+                current_session_token = Some(session_token.clone());
 
                 let http_event_tx = event_tx.clone();
                 let token_clone = session_token.clone();
@@ -490,6 +510,106 @@ pub async fn run_backend(mut cmd_rx: mpsc::Receiver<AppCommand>, event_tx: mpsc:
                         target_endpoint_id
                     )))
                     .await;
+            }
+            AppCommand::StartWanShare => {
+                // First ensure HTTP server is running
+                if http_cancel_token.is_none() {
+                    // Start HTTP server first
+                    let session_token = http_share::generate_session_token();
+                    let local_ip = local_ip_address::list_afinet_netifas()
+                        .ok()
+                        .and_then(|ips| {
+                            let mut best_ip = None;
+                            for (_name, ip) in ips {
+                                if ip.is_loopback() || !ip.is_ipv4() {
+                                    continue;
+                                }
+                                let ip_str = ip.to_string();
+                                if ip_str.starts_with("192.168.") {
+                                    return Some(ip_str);
+                                }
+                                if ip_str.starts_with("10.") {
+                                    best_ip = Some(ip_str);
+                                    continue;
+                                }
+                                if ip_str.starts_with("172.") && best_ip.is_none() {
+                                    best_ip = Some(ip_str);
+                                    continue;
+                                }
+                                if best_ip.is_none() {
+                                    best_ip = Some(ip_str);
+                                }
+                            }
+                            best_ip
+                        })
+                        .unwrap_or_else(|| "127.0.0.1".to_string());
+                    let share_url = format!(
+                        "http://{}:{}/{}",
+                        local_ip,
+                        http_share::HTTP_PORT,
+                        session_token
+                    );
+
+                    let cancel_token = CancellationToken::new();
+                    http_cancel_token = Some(cancel_token.clone());
+                    current_session_token = Some(session_token.clone());
+
+                    let http_event_tx = event_tx.clone();
+                    let token_clone = session_token.clone();
+                    let upload_state_clone = upload_state.clone();
+
+                    tokio::spawn(async move {
+                        if let Err(e) = http_share::start_default_http_server_with_websocket(
+                            &token_clone,
+                            http_event_tx.clone(),
+                            upload_state_clone,
+                            Some(cancel_token),
+                        )
+                        .await
+                        {
+                            tracing::error!("HTTP server error: {}", e);
+                            let _ = http_event_tx
+                                .send(AppEvent::Error(format!("HTTP server failed: {}", e)))
+                                .await;
+                        }
+                    });
+
+                    let _ = event_tx
+                        .send(AppEvent::HttpServerStarted { url: share_url })
+                        .await;
+                }
+
+                // Now start bore tunnel
+                let session_token = current_session_token.clone().unwrap_or_default();
+                let evt = event_tx.clone();
+
+                match http_share::BoreTunnel::start(http_share::HTTP_PORT).await {
+                    Ok(tunnel) => {
+                        let public_url = tunnel.public_url(&session_token);
+                        bore_tunnel = Some(tunnel);
+                        let _ = evt.send(AppEvent::WanShareReady { url: public_url }).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to start bore tunnel: {}", e);
+                        let _ = evt
+                            .send(AppEvent::WanShareError(format!(
+                                "Failed to start tunnel: {}",
+                                e
+                            )))
+                            .await;
+                    }
+                }
+            }
+            AppCommand::StopWanShare => {
+                if let Some(tunnel) = bore_tunnel.take() {
+                    tunnel.stop();
+                    let _ = event_tx.send(AppEvent::WanShareStopped).await;
+                    tracing::info!("WAN share tunnel stopped");
+                } else {
+                    let _ = event_tx
+                        .send(AppEvent::Status("WAN share is not running".to_string()))
+                        .await;
+                }
             }
         }
     }
