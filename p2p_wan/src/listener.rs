@@ -152,7 +152,7 @@ impl ConnectionListener {
                 Ok((mut send, mut recv)) => {
                     info!("Bi-directional stream opened with: {}", remote_node_id);
 
-                    // Receive the first message which should be FileMetadata
+                    // Receive the first message which should be FileMetadata or BenchmarkStart
                     match recv_msg(&mut recv).await {
                         Ok(WanTransferMsg::FileMetadata { info }) => {
                             info!(
@@ -173,6 +173,40 @@ impl ConnectionListener {
                                 )
                                 .await;
                             }
+                        }
+                        Ok(WanTransferMsg::BenchmarkStart { data_size }) => {
+                            info!("Benchmark started: expecting {} bytes", data_size);
+                            let start = std::time::Instant::now();
+
+                            // Drain all incoming data
+                            let mut received = 0u64;
+                            let mut buf = vec![0u8; 1024 * 1024]; // 1MB buffer
+                            loop {
+                                match recv.read(&mut buf).await {
+                                    Ok(Some(0)) | Ok(None) => break,
+                                    Ok(Some(n)) => {
+                                        received += n as u64;
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+
+                            let elapsed = start.elapsed();
+                            let speed_mbps =
+                                (received as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
+                            info!(
+                                "Benchmark complete: {} bytes in {:?} ({:.2} MB/s)",
+                                received, elapsed, speed_mbps
+                            );
+
+                            // Send benchmark result back
+                            let _ = send_msg(
+                                &mut send,
+                                &WanTransferMsg::BenchmarkComplete {
+                                    elapsed_ms: elapsed.as_millis() as u64,
+                                },
+                            )
+                            .await;
                         }
                         Ok(msg) => {
                             warn!("Unexpected message: {:?}", msg);

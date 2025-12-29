@@ -289,10 +289,11 @@ async fn test_local_endpoint_pair() -> Result<()> {
 /// This measures the maximum theoretical throughput of the QUIC connection
 #[tokio::test]
 async fn test_wan_throughput_benchmark() -> Result<()> {
+    use p2p_wan::protocol::{WanTransferMsg, recv_msg, send_msg};
     use std::time::Duration;
 
     tracing_subscriber::fmt()
-        .with_env_filter("warn")
+        .with_env_filter("info")
         .try_init()
         .ok();
 
@@ -328,15 +329,27 @@ async fn test_wan_throughput_benchmark() -> Result<()> {
         100 * 1024 * 1024, // 100MB
     ];
 
-    println!("\n{:<12} | {:<12} | {:<12}", "Size", "Time", "Speed");
-    println!("{}", "-".repeat(42));
+    println!(
+        "\n{:<12} | {:<12} | {:<15} | {:<15}",
+        "Size", "Sender Time", "Sender Speed", "Receiver Speed"
+    );
+    println!("{}", "-".repeat(62));
 
     for data_size in data_sizes {
         // Create test data in memory (no file I/O)
         let test_data = vec![0xABu8; data_size];
 
         // Open stream
-        let (mut send, _recv) = connection.open_bi().await?;
+        let (mut send, mut recv) = connection.open_bi().await?;
+
+        // Send BenchmarkStart message first
+        send_msg(
+            &mut send,
+            &WanTransferMsg::BenchmarkStart {
+                data_size: data_size as u64,
+            },
+        )
+        .await?;
 
         // Benchmark: send raw bytes
         let start = std::time::Instant::now();
@@ -348,14 +361,27 @@ async fn test_wan_throughput_benchmark() -> Result<()> {
         }
         send.finish()?;
 
-        let elapsed = start.elapsed();
-        let speed_mbps = (data_size as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
+        let sender_elapsed = start.elapsed();
+        let sender_speed = (data_size as f64 / sender_elapsed.as_secs_f64()) / 1_000_000.0;
+
+        // Wait for receiver's timing
+        let receiver_speed = match recv_msg(&mut recv).await {
+            Ok(WanTransferMsg::BenchmarkComplete { elapsed_ms }) => {
+                if elapsed_ms > 0 {
+                    (data_size as f64 / (elapsed_ms as f64 / 1000.0)) / 1_000_000.0
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
+        };
 
         println!(
-            "{:>10}MB | {:>10.2}s | {:>10.2} MB/s",
+            "{:>10}MB | {:>10.2}s | {:>12.2} MB/s | {:>12.2} MB/s",
             data_size / 1024 / 1024,
-            elapsed.as_secs_f64(),
-            speed_mbps
+            sender_elapsed.as_secs_f64(),
+            sender_speed,
+            receiver_speed
         );
     }
 

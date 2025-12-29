@@ -16,6 +16,10 @@ pub enum WanTransferMsg {
     TransferComplete,
     /// Error occurred during transfer
     Error { message: String },
+    /// Benchmark mode: receiver will drain all data without processing
+    BenchmarkStart { data_size: u64 },
+    /// Benchmark completed with timing info
+    BenchmarkComplete { elapsed_ms: u64 },
 }
 
 /// Send a protocol message over an iroh bidirectional stream
