@@ -41,6 +41,19 @@ impl IdentityManager {
                 .await
                 .context("Failed to save secret key")?;
 
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&key_path)
+                    .await
+                    .context("Failed to get metadata")?
+                    .permissions();
+                perms.set_mode(0o600);
+                fs::set_permissions(&key_path, perms)
+                    .await
+                    .context("Failed to set permissions")?;
+            }
+
             Ok(secret_key)
         }
     }
@@ -65,6 +78,17 @@ impl IdentityManager {
 
             std::fs::write(&key_path, secret_key.to_bytes())
                 .context("Failed to save secret key")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&key_path)
+                    .context("Failed to get metadata")?
+                    .permissions();
+                perms.set_mode(0o600);
+                std::fs::set_permissions(&key_path, perms)
+                    .context("Failed to set permissions")?;
+            }
 
             Ok(secret_key)
         }
