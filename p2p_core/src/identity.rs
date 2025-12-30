@@ -37,9 +37,19 @@ impl IdentityManager {
                     .context("Failed to create config directory")?;
             }
 
+            // Write key file
             fs::write(&key_path, secret_key.to_bytes())
                 .await
                 .context("Failed to save secret key")?;
+
+            // Set restrictive permissions (600)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&key_path).await?.permissions();
+                perms.set_mode(0o600);
+                fs::set_permissions(&key_path, perms).await?;
+            }
 
             Ok(secret_key)
         }
@@ -65,6 +75,15 @@ impl IdentityManager {
 
             std::fs::write(&key_path, secret_key.to_bytes())
                 .context("Failed to save secret key")?;
+
+            // Set restrictive permissions (600)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&key_path)?.permissions();
+                perms.set_mode(0o600);
+                std::fs::set_permissions(&key_path, perms)?;
+            }
 
             Ok(secret_key)
         }
@@ -93,5 +112,53 @@ pub fn get_iroh_endpoint_id() -> String {
             // Fallback to UUID if Iroh fails
             uuid::Uuid::new_v4().to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_key_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let manager = IdentityManager::new(dir.path().to_path_buf());
+
+        // Generate new key
+        let _ = manager.load_or_generate().await.unwrap();
+
+        let key_path = manager.get_key_path();
+        assert!(key_path.exists());
+
+        let metadata = std::fs::metadata(&key_path).unwrap();
+        let permissions = metadata.permissions();
+
+        // Check if permissions are 0o600 (rw-------)
+        // Note: permissions.mode() returns the full mode, including file type.
+        // We mask with 0o777 to get just the permissions.
+        assert_eq!(permissions.mode() & 0o777, 0o600, "Key file permissions should be 600");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_key_file_permissions_sync() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let manager = IdentityManager::new(dir.path().to_path_buf());
+
+        // Generate new key
+        let _ = manager.load_or_generate_sync().unwrap();
+
+        let key_path = manager.get_key_path();
+        assert!(key_path.exists());
+
+        let metadata = std::fs::metadata(&key_path).unwrap();
+        let permissions = metadata.permissions();
+
+        // Check if permissions are 0o600 (rw-------)
+        assert_eq!(permissions.mode() & 0o777, 0o600, "Key file permissions should be 600");
     }
 }
