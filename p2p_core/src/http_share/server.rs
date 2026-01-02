@@ -41,9 +41,11 @@ async fn not_found_handler() -> (axum::http::StatusCode, Html<&'static str>) {
     (axum::http::StatusCode::NOT_FOUND, Html(NOT_FOUND_HTML))
 }
 
-/// Generate a random session token (8 characters)
+/// Generate a random session token (128-bit UUID)
 pub fn generate_session_token() -> String {
-    Uuid::new_v4().to_string()[..8].to_string()
+    // Use full UUID for maximum entropy (128-bit)
+    // We do NOT truncate to 8 chars anymore as it's insufficient for security
+    Uuid::new_v4().to_string()
 }
 
 /// WebSocket upgrade handler
@@ -194,6 +196,7 @@ mod tests {
     #[test]
     fn test_generate_session_token() {
         let token = generate_session_token();
-        assert_eq!(token.len(), 8);
+        // Should be full UUID length (36 chars including hyphens)
+        assert_eq!(token.len(), 36);
     }
 }
