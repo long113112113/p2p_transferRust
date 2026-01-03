@@ -17,7 +17,6 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
 use super::websocket::{self, UploadState, WebSocketState};
@@ -63,11 +62,6 @@ pub fn create_router_with_websocket(
     upload_state: Arc<UploadState>,
     download_dir: PathBuf,
 ) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
     // Create shared WebSocket state
     let ws_state = Arc::new(WebSocketState {
         event_tx,
@@ -83,7 +77,6 @@ pub fn create_router_with_websocket(
         .route(&index_path, get(index_handler))
         .route(&ws_path, get(ws_upgrade_handler))
         .fallback(not_found_handler)
-        .layer(cors)
         .with_state(ws_state)
 }
 
@@ -137,16 +130,10 @@ pub async fn start_default_http_server_with_websocket(
 /// Build the axum router with a dynamic token path (no WebSocket)
 #[deprecated(note = "Use create_router_with_websocket instead")]
 pub fn create_router_with_token(token: &str) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
     let path = format!("/{}", token);
     Router::new()
         .route(&path, get(index_handler))
         .fallback(not_found_handler)
-        .layer(cors)
 }
 
 /// Start the HTTP server with a session token (deprecated - no WebSocket)
@@ -190,10 +177,42 @@ pub async fn start_default_http_server_with_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::Request,
+    };
+    use tower::ServiceExt; // for `oneshot`
 
     #[test]
     fn test_generate_session_token() {
         let token = generate_session_token();
         assert_eq!(token.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn test_cors_configuration() {
+        let token = "testtoken";
+        let (event_tx, _event_rx) = mpsc::channel(1);
+        let upload_state = Arc::new(UploadState::new());
+        let download_dir = PathBuf::from("/tmp");
+
+        let router = create_router_with_websocket(token, event_tx, upload_state, download_dir);
+
+        // Test with a different origin
+        let req = Request::builder()
+            .uri(format!("/{}", token))
+            .header("Origin", "http://evil.com")
+            .header("Access-Control-Request-Method", "GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = router.oneshot(req).await.unwrap();
+
+        // Check if CORS headers are missing (correct behavior after removing permissive CORS)
+        let headers = response.headers();
+        if let Some(allow_origin) = headers.get("access-control-allow-origin") {
+             // If we remove permissive CORS, this should NOT be present (or at least not *)
+             assert_ne!(allow_origin, "*", "Wildcard CORS should not be present");
+        }
     }
 }
