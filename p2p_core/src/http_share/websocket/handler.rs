@@ -2,7 +2,7 @@
 
 use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
 use super::state::{PendingUpload, WebSocketState};
-use super::utils::{cleanup_pending, wait_for_file_info};
+use super::utils::{cleanup_pending, validate_file_info, wait_for_file_info};
 use crate::AppEvent;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -38,6 +38,18 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     };
 
     let (raw_file_name, file_size) = file_info;
+
+    // Validate file info
+    if let Err(e) = validate_file_info(&raw_file_name, file_size) {
+        let _ = sender
+            .send(Message::Text(
+                serde_json::to_string(&ServerMessage::Error { message: e })
+                    .unwrap()
+                    .into(),
+            ))
+            .await;
+        return;
+    }
 
     // Sanitize filename to prevent directory traversal
     let file_name = std::path::Path::new(&raw_file_name)
