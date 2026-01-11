@@ -17,7 +17,6 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
 use super::websocket::{self, UploadState, WebSocketState};
@@ -65,10 +64,9 @@ pub fn create_router_with_websocket(
     upload_state: Arc<UploadState>,
     download_dir: PathBuf,
 ) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // SECURITY: Removed overly permissive CORS configuration.
+    // The web interface is served from the same origin, so CORS is not needed.
+    // Allowing 'Any' origin would enable malicious websites to access the local file share.
 
     // Create shared WebSocket state
     let ws_state = Arc::new(WebSocketState {
@@ -85,7 +83,6 @@ pub fn create_router_with_websocket(
         .route(&index_path, get(index_handler))
         .route(&ws_path, get(ws_upgrade_handler))
         .fallback(not_found_handler)
-        .layer(cors)
         .with_state(ws_state)
 }
 
@@ -139,16 +136,11 @@ pub async fn start_default_http_server_with_websocket(
 /// Build the axum router with a dynamic token path (no WebSocket)
 #[deprecated(note = "Use create_router_with_websocket instead")]
 pub fn create_router_with_token(token: &str) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
+    // SECURITY: Removed permissive CORS.
     let path = format!("/{}", token);
     Router::new()
         .route(&path, get(index_handler))
         .fallback(not_found_handler)
-        .layer(cors)
 }
 
 /// Start the HTTP server with a session token (deprecated - no WebSocket)
