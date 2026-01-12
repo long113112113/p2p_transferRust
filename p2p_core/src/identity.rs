@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use iroh::SecretKey;
 use std::path::PathBuf;
-use tokio::fs;
+use tokio::{fs, io::AsyncWriteExt};
+
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 const KEY_FILE_NAME: &str = "node_secret.key";
 
@@ -37,9 +40,21 @@ impl IdentityManager {
                     .context("Failed to create config directory")?;
             }
 
-            fs::write(&key_path, secret_key.to_bytes())
+            // Use OpenOptions to set file permissions to 600 (read/write only by owner)
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+
+            #[cfg(unix)]
+            options.mode(0o600);
+
+            let mut file = options
+                .open(&key_path)
                 .await
-                .context("Failed to save secret key")?;
+                .context("Failed to open secret key file for writing")?;
+
+            file.write_all(&secret_key.to_bytes())
+                .await
+                .context("Failed to write secret key")?;
 
             Ok(secret_key)
         }
@@ -63,8 +78,20 @@ impl IdentityManager {
                 std::fs::create_dir_all(parent).context("Failed to create config directory")?;
             }
 
-            std::fs::write(&key_path, secret_key.to_bytes())
-                .context("Failed to save secret key")?;
+            // Use OpenOptions to set file permissions to 600 (read/write only by owner)
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+
+            #[cfg(unix)]
+            options.mode(0o600);
+
+            use std::io::Write;
+            let mut file = options
+                .open(&key_path)
+                .context("Failed to open secret key file for writing")?;
+
+            file.write_all(&secret_key.to_bytes())
+                .context("Failed to write secret key")?;
 
             Ok(secret_key)
         }
