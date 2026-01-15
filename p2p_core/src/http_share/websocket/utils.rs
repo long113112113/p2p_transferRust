@@ -1,25 +1,37 @@
 //! WebSocket utility functions
 
-use super::messages::{ClientMessage, MAX_FILENAME_LENGTH, MAX_FILE_SIZE};
+use super::messages::{ClientMessage, HANDSHAKE_TIMEOUT_SECS, MAX_FILENAME_LENGTH, MAX_FILE_SIZE};
 use super::state::UploadState;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
+use std::time::Duration;
+use tokio::time::timeout;
 
 /// Wait for file_info message
 pub async fn wait_for_file_info(
     receiver: &mut futures_util::stream::SplitStream<WebSocket>,
 ) -> Option<(String, u64)> {
-    while let Some(msg) = receiver.next().await {
-        if let Ok(Message::Text(text)) = msg
-            && let Ok(ClientMessage::FileInfo {
-                file_name,
-                file_size,
-            }) = serde_json::from_str(&text)
-        {
-            return Some((file_name, file_size));
+    let duration = Duration::from_secs(HANDSHAKE_TIMEOUT_SECS);
+
+    let result = timeout(duration, async {
+        while let Some(msg) = receiver.next().await {
+            if let Ok(Message::Text(text)) = msg
+                && let Ok(ClientMessage::FileInfo {
+                    file_name,
+                    file_size,
+                }) = serde_json::from_str(&text)
+            {
+                return Some((file_name, file_size));
+            }
         }
+        None
+    })
+    .await;
+
+    match result {
+        Ok(Some(info)) => Some(info),
+        _ => None, // Timeout or stream ended
     }
-    None
 }
 
 /// Validate file info against security constraints

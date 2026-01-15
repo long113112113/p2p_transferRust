@@ -8,6 +8,9 @@ pub const CHUNK_SIZE: usize = 256 * 1024;
 /// Timeout for user response (60 seconds)
 pub const USER_RESPONSE_TIMEOUT_SECS: u64 = 60;
 
+/// Timeout for WebSocket handshake (10 seconds)
+pub const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
+
 /// Maximum filename length (255 bytes)
 pub const MAX_FILENAME_LENGTH: usize = 255;
 
