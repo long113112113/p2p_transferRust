@@ -14,20 +14,40 @@ use uuid::Uuid;
 /// Mobile browsers may have stricter timeouts, so we ping more frequently
 const PING_INTERVAL_SECS: u64 = 5;
 
+/// Timeout for the initial handshake to prevent DoS (10 seconds)
+const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
+
 /// Handle WebSocket connection
 pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client_ip: String) {
     let (mut sender, mut receiver) = socket.split();
 
     tracing::info!("WebSocket connection established from: {}", client_ip);
 
-    // Wait for file info message
-    let file_info = match wait_for_file_info(&mut receiver).await {
-        Some(info) => info,
-        None => {
+    // Wait for file info message with timeout
+    let file_info = match tokio::time::timeout(
+        tokio::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
+        wait_for_file_info(&mut receiver),
+    )
+    .await
+    {
+        Ok(Some(info)) => info,
+        Ok(None) => {
             let _ = sender
                 .send(Message::Text(
                     serde_json::to_string(&ServerMessage::Error {
                         message: "Expected file_info message".to_string(),
+                    })
+                    .unwrap()
+                    .into(),
+                ))
+                .await;
+            return;
+        }
+        Err(_) => {
+            let _ = sender
+                .send(Message::Text(
+                    serde_json::to_string(&ServerMessage::Error {
+                        message: "Handshake timed out".to_string(),
                     })
                     .unwrap()
                     .into(),
