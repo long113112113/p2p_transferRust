@@ -64,10 +64,6 @@ pub fn create_router_with_websocket(
     upload_state: Arc<UploadState>,
     download_dir: PathBuf,
 ) -> Router {
-    // SECURITY: Removed overly permissive CORS configuration.
-    // The web interface is served from the same origin, so CORS is not needed.
-    // Allowing 'Any' origin would enable malicious websites to access the local file share.
-
     // Create shared WebSocket state
     let ws_state = Arc::new(WebSocketState {
         event_tx,
@@ -136,7 +132,6 @@ pub async fn start_default_http_server_with_websocket(
 /// Build the axum router with a dynamic token path (no WebSocket)
 #[deprecated(note = "Use create_router_with_websocket instead")]
 pub fn create_router_with_token(token: &str) -> Router {
-    // SECURITY: Removed permissive CORS.
     let path = format!("/{}", token);
     Router::new()
         .route(&path, get(index_handler))
@@ -184,10 +179,40 @@ pub async fn start_default_http_server_with_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
 
     #[test]
     fn test_generate_session_token() {
         let token = generate_session_token();
         assert_eq!(token.len(), 32);
+    }
+
+    #[tokio::test]
+    async fn test_cors_headers_check() {
+        // Setup
+        let token = "test_token";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from(".");
+        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
+
+        // Request with Origin: http://evil.com
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/{}", token))
+                    .header("Origin", "http://evil.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Verify CORS headers are ABSENT (After Fix)
+        // This ensures the server does not explicitly allow cross-origin requests,
+        // so the browser will block them by default.
+        assert!(response.headers().get("access-control-allow-origin").is_none());
     }
 }
