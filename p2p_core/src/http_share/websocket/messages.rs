@@ -17,6 +17,9 @@ pub const MAX_FILENAME_LENGTH: usize = 255;
 /// Maximum file size (10 GB)
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
 
+/// Maximum number of concurrent pending uploads (DoS protection)
+pub const MAX_PENDING_UPLOADS: usize = 10;
+
 /// Messages from client to server
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -49,5 +52,6 @@ mod tests {
     fn test_constants() {
         assert_eq!(MAX_FILENAME_LENGTH, 255);
         assert!(MAX_FILE_SIZE > 0);
+        assert_eq!(MAX_PENDING_UPLOADS, 10);
     }
 }

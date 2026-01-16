@@ -1,7 +1,7 @@
 //! WebSocket connection handler
 
 use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
-use super::state::{PendingUpload, WebSocketState};
+use super::state::WebSocketState;
 use super::utils::{cleanup_pending, validate_file_info, wait_for_file_info};
 use crate::AppEvent;
 use axum::extract::ws::{Message, WebSocket};
@@ -84,9 +84,21 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     tokio::pin!(response_rx);
 
     // Store pending upload
+    if !state
+        .upload_state
+        .try_add_request(request_id.clone(), response_tx)
+        .await
     {
-        let mut pending = state.upload_state.pending.write().await;
-        pending.insert(request_id.clone(), PendingUpload { response_tx });
+        let _ = sender
+            .send(Message::Text(
+                serde_json::to_string(&ServerMessage::Rejected {
+                    reason: "Server is busy: too many pending uploads".to_string(),
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await;
+        return;
     }
 
     // Send upload request event to GUI
