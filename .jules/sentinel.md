@@ -6,3 +6,7 @@
 **Vulnerability:** The HTTP server included `CorsLayer::new().allow_origin(Any)`, allowing any website (including malicious ones) to make requests to the local file sharing server via the user's browser.
 **Learning:** Local servers often blindly copy CORS middleware from web examples. For servers where the frontend is embedded/served from the same origin, CORS is usually unnecessary and only serves to weaken security.
 **Prevention:** Default to NO CORS headers. Only add them if explicitly needed for a specific cross-origin use case. If needed, never use `Any` (`*`) for a local server with authentication tokens.
+## 2025-10-31 - Insecure File Permissions on Creation
+**Vulnerability:** Files received via upload were created using `File::create`, which defaults to system umask (often `0o644` or `0o666`), making sensitive files readable by other local users.
+**Learning:** Standard file creation methods prioritize convenience over security. For privacy-focused applications, default permissions are often too permissive.
+**Prevention:** Use `OpenOptions` with `.mode(0o600)` on Unix systems to explicitly restrict permissions to the owner only upon file creation.
