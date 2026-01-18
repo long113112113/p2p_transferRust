@@ -2,12 +2,12 @@
 
 use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
 use super::state::{PendingUpload, WebSocketState};
-use super::utils::{cleanup_pending, validate_file_info, wait_for_file_info};
+use super::utils::{cleanup_pending, create_secure_file, validate_file_info, wait_for_file_info};
 use crate::AppEvent;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use tokio::{fs::File, io::AsyncWriteExt, sync::oneshot};
+use tokio::{io::AsyncWriteExt, sync::oneshot};
 use uuid::Uuid;
 
 /// Ping interval for keeping WebSocket connection alive (5 seconds)
@@ -208,7 +208,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     }
 
     let file_path = download_dir.join(&file_name);
-    let mut file = match File::create(&file_path).await {
+    let mut file = match create_secure_file(&file_path).await {
         Ok(f) => f,
         Err(e) => {
             let _ = sender
