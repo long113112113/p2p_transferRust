@@ -4,8 +4,24 @@ use super::messages::{ClientMessage, HANDSHAKE_TIMEOUT_SECS, MAX_FILENAME_LENGTH
 use super::state::UploadState;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
+use std::path::Path;
 use std::time::Duration;
+use tokio::fs::{File, OpenOptions};
 use tokio::time::timeout;
+
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
+/// Create a file with secure permissions (0o600 on Unix)
+pub async fn create_secure_file(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+
+    #[cfg(unix)]
+    options.mode(0o600);
+
+    options.open(path).await
+}
 
 /// Wait for file_info message
 pub async fn wait_for_file_info(
@@ -74,5 +90,37 @@ mod tests {
 
         // Invalid file size
         assert!(validate_file_info("test.txt", MAX_FILE_SIZE + 1).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_secure_file_permissions() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!("secure_test_{}.txt", uuid::Uuid::new_v4()));
+
+        // Cleanup first just in case
+        let _ = tokio::fs::remove_file(&file_path).await;
+
+        let _file = create_secure_file(&file_path)
+            .await
+            .expect("Failed to create secure file");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = tokio::fs::metadata(&file_path)
+                .await
+                .expect("Failed to get metadata");
+            let permissions = metadata.permissions();
+            // Check that only owner has read/write (0o600)
+            // Note: mode() includes file type, so we mask it with 0o777
+            assert_eq!(
+                permissions.mode() & 0o777,
+                0o600,
+                "File permissions should be 0o600"
+            );
+        }
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(&file_path).await;
     }
 }
