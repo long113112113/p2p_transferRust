@@ -6,3 +6,7 @@
 **Vulnerability:** The HTTP server included `CorsLayer::new().allow_origin(Any)`, allowing any website (including malicious ones) to make requests to the local file sharing server via the user's browser.
 **Learning:** Local servers often blindly copy CORS middleware from web examples. For servers where the frontend is embedded/served from the same origin, CORS is usually unnecessary and only serves to weaken security.
 **Prevention:** Default to NO CORS headers. Only add them if explicitly needed for a specific cross-origin use case. If needed, never use `Any` (`*`) for a local server with authentication tokens.
+## 2026-01-12 - Unbounded Pending State DoS
+**Vulnerability:** The WebSocket handler stored pending upload requests in an unbounded `HashMap`, allowing an attacker to exhaust server memory or flood the user interface by initiating thousands of handshake requests without completing them.
+**Learning:** Async state management often overlooks the "waiting" state. Any state that waits for user interaction (like approval) must have a strict upper bound to prevent resource exhaustion.
+**Prevention:** Enforce hard limits on all state collections that can be influenced by external clients, especially those involving human-speed timeouts (e.g., waiting for user approval).
