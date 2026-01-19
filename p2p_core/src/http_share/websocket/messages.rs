@@ -17,8 +17,10 @@ pub const MAX_FILENAME_LENGTH: usize = 255;
 /// Maximum file size (10 GB)
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
 
+pub const MAX_PENDING_UPLOADS: usize = 10;
+
 /// Messages from client to server
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     /// Initial file info before upload
@@ -49,5 +51,6 @@ mod tests {
     fn test_constants() {
         assert_eq!(MAX_FILENAME_LENGTH, 255);
         assert!(MAX_FILE_SIZE > 0);
+        assert_eq!(MAX_PENDING_UPLOADS, 10);
     }
 }

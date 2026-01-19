@@ -1,13 +1,13 @@
 //! WebSocket connection handler
 
-use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
+use super::messages::{MAX_PENDING_UPLOADS, ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
 use super::state::{PendingUpload, WebSocketState};
-use super::utils::{cleanup_pending, validate_file_info, wait_for_file_info};
+use super::utils::{cleanup_pending, create_secure_file, validate_file_info, wait_for_file_info};
 use crate::AppEvent;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use tokio::{fs::File, io::AsyncWriteExt, sync::oneshot};
+use tokio::{io::AsyncWriteExt, sync::oneshot};
 use uuid::Uuid;
 
 /// Ping interval for keeping WebSocket connection alive (5 seconds)
@@ -84,8 +84,28 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     tokio::pin!(response_rx);
 
     // Store pending upload
+    if !state
+        .upload_state
+        .try_add_request(request_id.clone(), response_tx)
+        .await
     {
         let mut pending = state.upload_state.pending.write().await;
+
+        // Check for DoS: Limit concurrent pending uploads
+        if pending.len() >= MAX_PENDING_UPLOADS {
+            tracing::warn!("Rejecting upload from {}: Too many pending uploads", client_ip);
+            let _ = sender
+                .send(Message::Text(
+                    serde_json::to_string(&ServerMessage::Error {
+                        message: "Too many pending uploads".to_string(),
+                    })
+                    .unwrap()
+                    .into(),
+                ))
+                .await;
+            return;
+        }
+
         pending.insert(request_id.clone(), PendingUpload { response_tx });
     }
 
@@ -208,7 +228,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     }
 
     let file_path = download_dir.join(&file_name);
-    let mut file = match File::create(&file_path).await {
+    let mut file = match create_secure_file(&file_path).await {
         Ok(f) => f,
         Err(e) => {
             let _ = sender

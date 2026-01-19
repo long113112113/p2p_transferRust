@@ -8,7 +8,9 @@ mod state;
 mod utils;
 
 pub use handler::handle_socket;
-pub use messages::{CHUNK_SIZE, ClientMessage, ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
+pub use messages::{
+    CHUNK_SIZE, MAX_PENDING_UPLOADS, ClientMessage, ServerMessage, USER_RESPONSE_TIMEOUT_SECS,
+};
 pub use state::{PendingUpload, UploadState, WebSocketState, respond_to_upload};
 
 use axum::{
