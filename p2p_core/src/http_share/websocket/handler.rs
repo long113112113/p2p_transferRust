@@ -1,6 +1,6 @@
 //! WebSocket connection handler
 
-use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
+use super::messages::{MAX_PENDING_UPLOADS, ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
 use super::state::{PendingUpload, WebSocketState};
 use super::utils::{cleanup_pending, create_secure_file, validate_file_info, wait_for_file_info};
 use crate::AppEvent;
@@ -84,8 +84,28 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     tokio::pin!(response_rx);
 
     // Store pending upload
+    if !state
+        .upload_state
+        .try_add_request(request_id.clone(), response_tx)
+        .await
     {
         let mut pending = state.upload_state.pending.write().await;
+
+        // Check for DoS: Limit concurrent pending uploads
+        if pending.len() >= MAX_PENDING_UPLOADS {
+            tracing::warn!("Rejecting upload from {}: Too many pending uploads", client_ip);
+            let _ = sender
+                .send(Message::Text(
+                    serde_json::to_string(&ServerMessage::Error {
+                        message: "Too many pending uploads".to_string(),
+                    })
+                    .unwrap()
+                    .into(),
+                ))
+                .await;
+            return;
+        }
+
         pending.insert(request_id.clone(), PendingUpload { response_tx });
     }
 

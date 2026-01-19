@@ -10,3 +10,11 @@
 **Vulnerability:** Files received via upload were created using `File::create`, which defaults to system umask (often `0o644` or `0o666`), making sensitive files readable by other local users.
 **Learning:** Standard file creation methods prioritize convenience over security. For privacy-focused applications, default permissions are often too permissive.
 **Prevention:** Use `OpenOptions` with `.mode(0o600)` on Unix systems to explicitly restrict permissions to the owner only upon file creation.
+## 2026-05-27 - Unbounded State DoS in WebSocket Handlers
+**Vulnerability:** The WebSocket upload handler allowed unlimited concurrent "pending" upload requests to accumulate in memory before user approval, allowing a malicious client to exhaust server resources.
+**Learning:** Async services waiting for user interaction (like file acceptance) must have strict concurrency limits, as "pending" states consume memory and file descriptors.
+**Prevention:** Enforce `MAX_PENDING_REQUESTS` limits on any stateful tracking map. Reject new requests immediately when the limit is reached.
+## 2026-01-12 - Unbounded Pending State DoS
+**Vulnerability:** The WebSocket handler stored pending upload requests in an unbounded `HashMap`, allowing an attacker to exhaust server memory or flood the user interface by initiating thousands of handshake requests without completing them.
+**Learning:** Async state management often overlooks the "waiting" state. Any state that waits for user interaction (like approval) must have a strict upper bound to prevent resource exhaustion.
+**Prevention:** Enforce hard limits on all state collections that can be influenced by external clients, especially those involving human-speed timeouts (e.g., waiting for user approval).

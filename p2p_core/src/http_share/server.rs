@@ -215,4 +215,91 @@ mod tests {
         // so the browser will block them by default.
         assert!(response.headers().get("access-control-allow-origin").is_none());
     }
+
+    #[tokio::test]
+    async fn test_max_pending_uploads_limit() {
+        use crate::http_share::websocket::{ClientMessage, MAX_PENDING_UPLOADS};
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::connect_async;
+
+        // Setup
+        let token = "test_token_limit";
+        let (tx, _rx) = mpsc::channel(100);
+        // Keep rx alive to prevent channel closed errors (though ignored in handler)
+        // But more importantly, if we don't hold it, it might affect test behavior if we needed to check events
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from("."); // Mock path
+
+        // Create router manually to get the port
+        let router = create_router_with_websocket(token, tx, upload_state.clone(), download_dir);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Spawn server
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+
+        // Give server a moment to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let ws_url = format!("ws://127.0.0.1:{}/{}/ws", port, token);
+        let mut clients = Vec::new();
+
+        // Connect MAX + 2 clients
+        for i in 0..(MAX_PENDING_UPLOADS + 2) {
+            let (ws_stream, _) = connect_async(&ws_url).await.expect("Failed to connect");
+            let (mut write, read) = ws_stream.split();
+
+            // Send FileInfo to trigger pending state
+            let msg = ClientMessage::FileInfo {
+                file_name: format!("file_{}.txt", i),
+                file_size: 100,
+            };
+            write
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    serde_json::to_string(&msg).unwrap().into(),
+                ))
+                .await
+                .unwrap();
+
+            // Keep write alive to prevent connection closing
+            clients.push((write, read));
+        }
+
+        // Allow some time for processing
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Check results
+        let mut rejected_count = 0;
+
+        for (_write, read) in clients.iter_mut() {
+            // Check for rejection message
+            // We use a timeout because accepted clients might not receive anything until user action
+            if let Ok(Some(Ok(msg))) =
+                tokio::time::timeout(tokio::time::Duration::from_millis(100), read.next()).await
+            {
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                    if text.contains("Too many pending uploads") {
+                        rejected_count += 1;
+                    }
+                }
+            }
+        }
+
+        let pending_count = upload_state.pending.read().await.len();
+
+        // We expect at least 1 rejection (actually exactly 2 if we sent MAX+2 and all processed)
+        assert!(rejected_count > 0, "Should have rejected some requests");
+
+        // Check server state
+        // Should be exactly MAX_PENDING_UPLOADS (10)
+        assert_eq!(pending_count, MAX_PENDING_UPLOADS);
+    }
 }
