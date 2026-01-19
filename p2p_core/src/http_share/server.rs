@@ -7,7 +7,9 @@ use crate::config;
 use anyhow::Result;
 use axum::{
     Router,
-    extract::ws::WebSocketUpgrade,
+    extract::{Request, ws::WebSocketUpgrade},
+    middleware::{self, Next},
+    http::{HeaderValue, header},
     response::{Html, Response},
     routing::get,
 };
@@ -38,6 +40,31 @@ async fn index_handler() -> Html<&'static str> {
 /// Handler for invalid routes - serves 404 page
 async fn not_found_handler() -> (axum::http::StatusCode, Html<&'static str>) {
     (axum::http::StatusCode::NOT_FOUND, Html(NOT_FOUND_HTML))
+}
+
+/// Middleware to add security headers
+async fn add_security_headers(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:;"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::X_FRAME_OPTIONS,
+        HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+
+    response
 }
 
 /// Generate a random session token (32 characters)
@@ -79,6 +106,7 @@ pub fn create_router_with_websocket(
         .route(&index_path, get(index_handler))
         .route(&ws_path, get(ws_upgrade_handler))
         .fallback(not_found_handler)
+        .layer(middleware::from_fn(add_security_headers))
         .with_state(ws_state)
 }
 
