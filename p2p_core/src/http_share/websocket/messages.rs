@@ -17,7 +17,6 @@ pub const MAX_FILENAME_LENGTH: usize = 255;
 /// Maximum file size (10 GB)
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
 
-/// Maximum number of concurrent pending uploads to prevent DoS
 pub const MAX_PENDING_UPLOADS: usize = 10;
 
 /// Messages from client to server

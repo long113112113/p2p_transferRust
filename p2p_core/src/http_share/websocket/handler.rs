@@ -84,6 +84,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     tokio::pin!(response_rx);
 
     // Store pending upload
+    if !state
+        .upload_state
+        .try_add_request(request_id.clone(), response_tx)
+        .await
     {
         let mut pending = state.upload_state.pending.write().await;
 
