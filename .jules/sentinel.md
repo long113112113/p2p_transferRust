@@ -18,3 +18,7 @@
 **Vulnerability:** The WebSocket handler stored pending upload requests in an unbounded `HashMap`, allowing an attacker to exhaust server memory or flood the user interface by initiating thousands of handshake requests without completing them.
 **Learning:** Async state management often overlooks the "waiting" state. Any state that waits for user interaction (like approval) must have a strict upper bound to prevent resource exhaustion.
 **Prevention:** Enforce hard limits on all state collections that can be influenced by external clients, especially those involving human-speed timeouts (e.g., waiting for user approval).
+## 2026-05-27 - Use-After-Move in Async Helper Error Handling
+**Vulnerability:** A `try_add_request` helper method consumed a `oneshot::Sender` by value but failed to return it on error. The calling code attempted to use the sender in a fallback error handling path, leading to a compilation error (and potential logic bug if it were `Copy`).
+**Learning:** Async helper methods that consume resources (like channels) must be carefully designed. If the resource is needed for error handling in the caller, the helper should return it or handle the error internally.
+**Prevention:** Encapsulate state mutations fully within the helper method. If a check fails (e.g., DoS limit), the helper should handle the rejection or return a result type that clearly indicates ownership status. Avoid "check-then-insert" patterns where ownership is split.

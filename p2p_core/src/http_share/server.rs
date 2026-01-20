@@ -330,4 +330,79 @@ mod tests {
         // Should be exactly MAX_PENDING_UPLOADS (10)
         assert_eq!(pending_count, MAX_PENDING_UPLOADS);
     }
+
+    #[tokio::test]
+    async fn test_request_id_length() {
+        use crate::http_share::websocket::ClientMessage;
+        use crate::AppEvent;
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::connect_async;
+
+        // Setup
+        let token = "test_token_uuid";
+        let (tx, mut rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from("."); // Mock path
+
+        // Create router manually to get the port
+        let router =
+            create_router_with_websocket(token, tx.clone(), upload_state.clone(), download_dir);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Spawn server
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+
+        // Give server a moment to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let ws_url = format!("ws://127.0.0.1:{}/{}/ws", port, token);
+
+        // Connect client
+        let (ws_stream, _) = connect_async(&ws_url).await.expect("Failed to connect");
+        let (mut write, _read) = ws_stream.split();
+
+        // Send FileInfo
+        let msg = ClientMessage::FileInfo {
+            file_name: "test.txt".to_string(),
+            file_size: 100,
+        };
+        write
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                serde_json::to_string(&msg).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+
+        // Wait for AppEvent::UploadRequest
+        // We might get other events (like Status), so loop until we find it or timeout
+        let event = tokio::time::timeout(tokio::time::Duration::from_secs(2), async {
+            while let Some(evt) = rx.recv().await {
+                if let AppEvent::UploadRequest { request_id, .. } = evt {
+                    return Some(request_id);
+                }
+            }
+            None
+        })
+        .await
+        .expect("Timeout waiting for UploadRequest");
+
+        if let Some(request_id) = event {
+            assert_eq!(
+                request_id.len(),
+                32,
+                "Request ID should be 32 characters long (UUID simple hex)"
+            );
+        } else {
+            panic!("Expected UploadRequest event");
+        }
+    }
 }
