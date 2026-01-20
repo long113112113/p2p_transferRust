@@ -1,7 +1,7 @@
 //! WebSocket connection handler
 
-use super::messages::{MAX_PENDING_UPLOADS, ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
-use super::state::{PendingUpload, WebSocketState};
+use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
+use super::state::WebSocketState;
 use super::utils::{cleanup_pending, create_secure_file, validate_file_info, wait_for_file_info};
 use crate::AppEvent;
 use axum::extract::ws::{Message, WebSocket};
@@ -76,7 +76,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown_file.bin".to_string());
-    let request_id = Uuid::new_v4().to_string()[..8].to_string();
+    // Use full UUID entropy (128 bits) instead of 8 chars (32 bits)
+    // to prevent brute-force attacks on request tokens.
+    let request_id = Uuid::new_v4().simple().to_string();
 
     // Create response channel
     let (response_tx, response_rx) = oneshot::channel();
@@ -89,24 +91,17 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         .try_add_request(request_id.clone(), response_tx)
         .await
     {
-        let mut pending = state.upload_state.pending.write().await;
-
-        // Check for DoS: Limit concurrent pending uploads
-        if pending.len() >= MAX_PENDING_UPLOADS {
-            tracing::warn!("Rejecting upload from {}: Too many pending uploads", client_ip);
-            let _ = sender
-                .send(Message::Text(
-                    serde_json::to_string(&ServerMessage::Error {
-                        message: "Too many pending uploads".to_string(),
-                    })
-                    .unwrap()
-                    .into(),
-                ))
-                .await;
-            return;
-        }
-
-        pending.insert(request_id.clone(), PendingUpload { response_tx });
+        tracing::warn!("Rejecting upload from {}: Too many pending uploads", client_ip);
+        let _ = sender
+            .send(Message::Text(
+                serde_json::to_string(&ServerMessage::Error {
+                    message: "Too many pending uploads".to_string(),
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await;
+        return;
     }
 
     // Send upload request event to GUI
