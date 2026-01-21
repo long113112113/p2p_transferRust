@@ -29,12 +29,28 @@ pub const HTTP_PORT: u16 = 8080;
 /// Static HTML content for the web interface
 const INDEX_HTML: &str = include_str!("static/index.html");
 
+/// Static JS content for the web interface
+const APP_JS: &str = include_str!("static/app.js");
+
+/// Static CSS content for the web interface
+const STYLE_CSS: &str = include_str!("static/style.css");
+
 /// Static HTML content for the 404 page
 const NOT_FOUND_HTML: &str = include_str!("static/404.html");
 
 /// Handler for the share route - serves the main web interface
 async fn index_handler() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+
+/// Handler for app.js
+async fn js_handler() -> impl axum::response::IntoResponse {
+    ([(header::CONTENT_TYPE, "application/javascript")], APP_JS)
+}
+
+/// Handler for style.css
+async fn css_handler() -> impl axum::response::IntoResponse {
+    ([(header::CONTENT_TYPE, "text/css")], STYLE_CSS)
 }
 
 /// Handler for invalid routes - serves 404 page
@@ -49,7 +65,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
 
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:;"),
+        HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:;"),
     );
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -105,6 +121,8 @@ pub fn create_router_with_websocket(
     Router::new()
         .route(&index_path, get(index_handler))
         .route(&ws_path, get(ws_upgrade_handler))
+        .route("/app.js", get(js_handler))
+        .route("/style.css", get(css_handler))
         .fallback(not_found_handler)
         .layer(middleware::from_fn(add_security_headers))
         .with_state(ws_state)
@@ -242,6 +260,16 @@ mod tests {
         // This ensures the server does not explicitly allow cross-origin requests,
         // so the browser will block them by default.
         assert!(response.headers().get("access-control-allow-origin").is_none());
+
+        // Verify CSP header
+        let csp = response
+            .headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("script-src 'self'"));
+        assert!(!csp.contains("script-src 'self' 'unsafe-inline'"));
     }
 
     #[tokio::test]

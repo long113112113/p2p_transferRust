@@ -1,0 +1,13 @@
+   Compiling p2p_core v0.1.0 (/app/p2p_core)
+warning: unused import: `AppEvent`
+ --> p2p_core/examples/run_server.rs:3:16
+  |
+3 | use p2p_core::{AppEvent, http_share::{server, websocket::UploadState}};
+  |                ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `p2p_core` (example "run_server") generated 1 warning (run `cargo fix --example "run_server"` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.59s
+     Running `target/debug/examples/run_server`
+Starting server on http://127.0.0.1:8080/test-token
