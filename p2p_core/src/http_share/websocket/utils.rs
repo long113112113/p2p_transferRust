@@ -9,9 +9,6 @@ use std::time::Duration;
 use tokio::fs::{File, OpenOptions};
 use tokio::time::timeout;
 
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
-
 /// Create a file with secure permissions (0o600 on Unix)
 pub async fn create_secure_file(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
