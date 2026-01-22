@@ -29,12 +29,20 @@ pub const HTTP_PORT: u16 = 8080;
 /// Static HTML content for the web interface
 const INDEX_HTML: &str = include_str!("static/index.html");
 
+/// Static JavaScript content
+const APP_JS: &str = include_str!("static/app.js");
+
 /// Static HTML content for the 404 page
 const NOT_FOUND_HTML: &str = include_str!("static/404.html");
 
 /// Handler for the share route - serves the main web interface
 async fn index_handler() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+
+/// Handler for the app.js route
+async fn app_js_handler() -> ([(header::HeaderName, &'static str); 1], &'static str) {
+    ([(header::CONTENT_TYPE, "application/javascript")], APP_JS)
 }
 
 /// Handler for invalid routes - serves 404 page
@@ -49,7 +57,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
 
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:;"),
+        HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:;"),
     );
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -104,6 +112,7 @@ pub fn create_router_with_websocket(
 
     Router::new()
         .route(&index_path, get(index_handler))
+        .route("/app.js", get(app_js_handler))
         .route(&ws_path, get(ws_upgrade_handler))
         .fallback(not_found_handler)
         .layer(middleware::from_fn(add_security_headers))
@@ -404,5 +413,42 @@ mod tests {
         } else {
             panic!("Expected UploadRequest event");
         }
+    }
+
+    #[tokio::test]
+    async fn test_app_js_served() {
+        use axum::http::StatusCode;
+
+        // Setup
+        let token = "test_token_js";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from(".");
+        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
+
+        // Request app.js
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/javascript"
+        );
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+        assert!(body_str.contains("const els = {"));
     }
 }
