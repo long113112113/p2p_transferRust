@@ -128,6 +128,24 @@ async fn handle_verification_handshake(
         return Ok(());
     }
 
+    // Enforce concurrency limit to prevent brute-force attacks
+    // The guard is held until the end of the function scope
+    let _guard = match pairing::PairingGuard::try_acquire() {
+        Some(g) => g,
+        None => {
+            send_msg(
+                send,
+                &TransferMsg::VerificationFailed {
+                    message: "Too many pending verification attempts".to_string(),
+                },
+            )
+            .await?;
+            // We don't notify the user to avoid spam, but we log it
+            tracing::warn!("Rejected pairing from {}: Too many pending attempts", remote_addr);
+            return Err(anyhow!("Too many pending attempts"));
+        }
+    };
+
     let code = pairing::generate_verification_code();
 
     let _ = event_tx
@@ -145,6 +163,10 @@ async fn handle_verification_handshake(
         TransferMsg::VerificationCode {
             code: received_code,
         } => {
+            // Add delay to slow down brute-force attacks
+            // This holds the connection (and the guard) for 2 seconds
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
             if received_code == code {
                 pairing::add_pairing(&endpoint_id, &peer_name);
                 send_msg(send, &TransferMsg::VerificationSuccess).await?;
