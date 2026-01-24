@@ -26,3 +26,7 @@
 **Vulnerability:** The embedded web interface utilized inline JavaScript, necessitating the use of `'unsafe-inline'` in the Content Security Policy (CSP), thereby increasing susceptibility to Cross-Site Scripting (XSS).
 **Learning:** In single-binary applications using `include_str!`, developers often default to inlining all assets for simplicity, neglecting the security benefits of separating concerns to enable strict CSP.
 **Prevention:** Separate JavaScript and CSS into distinct files even in embedded servers. Serve them via dedicated routes and embed them individually to enable `script-src 'self'` and eliminate XSS vectors.
+## 2026-06-03 - Unlimited Verification Attempts in Async Handshake
+**Vulnerability:** The pairing verification handshake allowed unlimited concurrent attempts. Since the 4-digit code is generated per session, an attacker could spawn thousands of concurrent connections to brute-force the code by statistical probability or resource exhaustion.
+**Learning:** Short codes (like 4-digit PINs) rely entirely on rate limiting for security. In an async server, "concurrency" is the enemy of rate limiting if not explicitly managed. Generating a new code per connection does not protect against brute force if the attacker can open enough connections to guess one correctly.
+**Prevention:** Implement strict global concurrency limits for sensitive handshakes using atomic counters or semaphores. Combine this with artificial delays to drastically reduce the effective guess rate.
