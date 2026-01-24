@@ -1,13 +1,12 @@
 use crate::{AppEvent, FileInfo};
 use anyhow::Result;
 use std::path::PathBuf;
-use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
 use super::constants::BUFFER_SIZE;
 use super::hash::compute_file_hash;
-use super::utils::{report_progress, sanitize_file_name};
+use super::utils::{open_secure_file, report_progress, sanitize_file_name};
 
 /// Receive a single file from the stream
 pub async fn receive_file(
@@ -42,15 +41,8 @@ pub async fn receive_file(
     use super::protocol::{TransferMsg, send_msg};
     send_msg(send, &TransferMsg::ResumeInfo { offset }).await?;
 
-    let mut file = if offset > 0 {
-        tokio::fs::OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(&file_path)
-            .await?
-    } else {
-        File::create(&file_path).await?
-    };
+    // Use open_secure_file to ensure secure permissions (0o600) on creation
+    let mut file = open_secure_file(&file_path, offset).await?;
 
     let mut received: u64 = offset;
     let mut buffer = vec![0u8; BUFFER_SIZE];
