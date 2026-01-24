@@ -4,7 +4,25 @@ use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use std::path::Path;
 use std::time::Instant;
+use tokio::fs::{File, OpenOptions};
 use tokio::sync::mpsc;
+
+/// Open a file with secure permissions (0o600 on Unix) for writing
+pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true);
+
+    if offset > 0 {
+        options.append(true);
+    } else {
+        options.create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+    }
+
+    options.open(path).await
+}
+
 /// Format transfer speed from bytes and elapsed time
 pub fn format_transfer_speed(bytes_transferred: u64, elapsed_secs: f64) -> String {
     if elapsed_secs <= 0.0 {
@@ -80,5 +98,37 @@ mod tests {
         assert_eq!(sanitize_file_name(".."), "unknown_file");
         assert_eq!(sanitize_file_name(""), "unknown_file");
         assert_eq!(sanitize_file_name("foo/../bar.txt"), "bar.txt");
+    }
+
+    #[tokio::test]
+    async fn test_open_secure_file_permissions() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!("secure_transfer_test_{}.txt", uuid::Uuid::new_v4()));
+
+        // Cleanup first just in case
+        let _ = tokio::fs::remove_file(&file_path).await;
+
+        let _file = open_secure_file(&file_path, 0)
+            .await
+            .expect("Failed to create secure file");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = tokio::fs::metadata(&file_path)
+                .await
+                .expect("Failed to get metadata");
+            let permissions = metadata.permissions();
+            // Check that only owner has read/write (0o600)
+            // Note: mode() includes file type, so we mask it with 0o777
+            assert_eq!(
+                permissions.mode() & 0o777,
+                0o600,
+                "File permissions should be 0o600"
+            );
+        }
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(&file_path).await;
     }
 }

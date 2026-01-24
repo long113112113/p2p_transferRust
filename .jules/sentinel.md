@@ -26,3 +26,7 @@
 **Vulnerability:** The embedded web interface utilized inline JavaScript, necessitating the use of `'unsafe-inline'` in the Content Security Policy (CSP), thereby increasing susceptibility to Cross-Site Scripting (XSS).
 **Learning:** In single-binary applications using `include_str!`, developers often default to inlining all assets for simplicity, neglecting the security benefits of separating concerns to enable strict CSP.
 **Prevention:** Separate JavaScript and CSS into distinct files even in embedded servers. Serve them via dedicated routes and embed them individually to enable `script-src 'self'` and eliminate XSS vectors.
+## 2026-06-15 - Insecure P2P File Creation
+**Vulnerability:** The P2P transfer module created received files using `File::create`, which does not set restrictive permissions (e.g., 0o600), leaving downloaded files readable by other local users on Unix systems.
+**Learning:** Security fixes applied to one module (like `http_share`) are often missed in parallel implementations (like `transfer`). "Secure by default" wrappers should be shared across the entire codebase.
+**Prevention:** Create centralized security helper functions (like `open_secure_file`) in a shared utility module and enforce their usage across all file creation paths, rather than duplicating logic.
