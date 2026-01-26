@@ -1,6 +1,6 @@
 //! WebSocket utility functions
 
-use super::messages::{ClientMessage, HANDSHAKE_TIMEOUT_SECS, MAX_FILENAME_LENGTH, MAX_FILE_SIZE};
+use super::messages::{ClientMessage, HANDSHAKE_TIMEOUT_SECS, MAX_FILE_SIZE, MAX_FILENAME_LENGTH};
 use super::state::UploadState;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;

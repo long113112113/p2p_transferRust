@@ -8,8 +8,8 @@ use anyhow::Result;
 use axum::{
     Router,
     extract::{Request, ws::WebSocketUpgrade},
-    middleware::{self, Next},
     http::{HeaderValue, header},
+    middleware::{self, Next},
     response::{Html, Response},
     routing::get,
 };
@@ -71,10 +71,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
-    headers.insert(
-        header::X_FRAME_OPTIONS,
-        HeaderValue::from_static("DENY"),
-    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     headers.insert(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
@@ -259,7 +256,12 @@ mod tests {
         // Verify CORS headers are ABSENT (After Fix)
         // This ensures the server does not explicitly allow cross-origin requests,
         // so the browser will block them by default.
-        assert!(response.headers().get("access-control-allow-origin").is_none());
+        assert!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .is_none()
+        );
 
         // Verify CSP header
         let csp = response
@@ -361,8 +363,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_id_length() {
-        use crate::http_share::websocket::ClientMessage;
         use crate::AppEvent;
+        use crate::http_share::websocket::ClientMessage;
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::connect_async;
 

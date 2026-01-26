@@ -91,7 +91,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         .try_add_request(request_id.clone(), response_tx)
         .await
     {
-        tracing::warn!("Rejecting upload from {}: Too many pending uploads", client_ip);
+        tracing::warn!(
+            "Rejecting upload from {}: Too many pending uploads",
+            client_ip
+        );
         let _ = sender
             .send(Message::Text(
                 serde_json::to_string(&ServerMessage::Error {
@@ -262,7 +265,15 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Binary(data))) => {
-                        if let Err(e) = file.write_all(&data).await {
+                        // Enforce file size limit by slicing excess data
+                        let remaining_bytes = file_size.saturating_sub(received_bytes);
+                        let data_to_write = if data.len() as u64 > remaining_bytes {
+                            &data[..remaining_bytes as usize]
+                        } else {
+                            &data
+                        };
+
+                        if let Err(e) = file.write_all(data_to_write).await {
                             let _ = sender
                                 .send(Message::Text(
                                     serde_json::to_string(&ServerMessage::Error {
@@ -275,7 +286,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                             break;
                         }
 
-                        received_bytes += data.len() as u64;
+                        received_bytes += data_to_write.len() as u64;
 
                         // Send progress every 100ms or at completion
                         if last_progress_update.elapsed().as_millis() > 100 || received_bytes >= file_size {

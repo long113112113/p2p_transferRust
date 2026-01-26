@@ -3,8 +3,8 @@
 //! Stores paired endpoint IDs with 24-hour expiry.
 
 use crate::config::{AppConfig, PairedDevice};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Pairing expires after 24 hours

@@ -26,7 +26,11 @@ impl UploadState {
 
     /// Try to add a pending upload request
     /// Returns false if the pending limit is reached
-    pub async fn try_add_request(&self, request_id: String, response_tx: oneshot::Sender<bool>) -> bool {
+    pub async fn try_add_request(
+        &self,
+        request_id: String,
+        response_tx: oneshot::Sender<bool>,
+    ) -> bool {
         let mut pending = self.pending.write().await;
         if pending.len() >= MAX_PENDING_UPLOADS {
             return false;
