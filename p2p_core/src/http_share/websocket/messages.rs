@@ -28,7 +28,7 @@ pub enum ClientMessage {
 }
 
 /// Messages from server to client
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     /// Upload request accepted

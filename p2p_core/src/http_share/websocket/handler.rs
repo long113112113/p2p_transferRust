@@ -265,15 +265,30 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Binary(data))) => {
-                        // Enforce file size limit by slicing excess data
-                        let remaining_bytes = file_size.saturating_sub(received_bytes);
-                        let data_to_write = if data.len() as u64 > remaining_bytes {
-                            &data[..remaining_bytes as usize]
+                        let remaining = file_size.saturating_sub(received_bytes);
+
+                        // Check if we already have all data
+                        if remaining == 0 {
+                            let _ = sender
+                                .send(Message::Text(
+                                    serde_json::to_string(&ServerMessage::Error {
+                                        message: "Received more data than declared".to_string(),
+                                    })
+                                    .unwrap()
+                                    .into(),
+                                ))
+                                .await;
+                            return; // Stop processing
+                        }
+
+                        let data_len = data.len() as u64;
+                        let (to_write, overflow) = if data_len > remaining {
+                            (&data[..remaining as usize], true)
                         } else {
-                            &data
+                            (&data[..], false)
                         };
 
-                        if let Err(e) = file.write_all(data_to_write).await {
+                        if let Err(e) = file.write_all(to_write).await {
                             let _ = sender
                                 .send(Message::Text(
                                     serde_json::to_string(&ServerMessage::Error {
@@ -286,15 +301,18 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                             break;
                         }
 
-                        received_bytes += data_to_write.len() as u64;
+                        received_bytes += to_write.len() as u64;
 
                         // Send progress every 100ms or at completion
-                        if last_progress_update.elapsed().as_millis() > 100 || received_bytes >= file_size {
+                        if last_progress_update.elapsed().as_millis() > 100 || received_bytes >= file_size
+                        {
                             let _ = sender
                                 .send(Message::Text(
-                                    serde_json::to_string(&ServerMessage::Progress { received_bytes })
-                                        .unwrap()
-                                        .into(),
+                                    serde_json::to_string(&ServerMessage::Progress {
+                                        received_bytes,
+                                    })
+                                    .unwrap()
+                                    .into(),
                                 ))
                                 .await;
 
@@ -309,6 +327,15 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                                 .await;
 
                             last_progress_update = std::time::Instant::now();
+                        }
+
+                        if overflow {
+                            tracing::warn!(
+                                "Client {} sent more data than declared. Truncated.",
+                                client_ip
+                            );
+                            // We stop accepting more data as we have the full file
+                            break;
                         }
 
                         if received_bytes >= file_size {
