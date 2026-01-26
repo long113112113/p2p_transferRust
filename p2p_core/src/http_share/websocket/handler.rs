@@ -91,7 +91,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         .try_add_request(request_id.clone(), response_tx)
         .await
     {
-        tracing::warn!("Rejecting upload from {}: Too many pending uploads", client_ip);
+        tracing::warn!(
+            "Rejecting upload from {}: Too many pending uploads",
+            client_ip
+        );
         let _ = sender
             .send(Message::Text(
                 serde_json::to_string(&ServerMessage::Error {
