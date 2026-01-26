@@ -141,7 +141,10 @@ async fn handle_verification_handshake(
             )
             .await?;
             // We don't notify the user to avoid spam, but we log it
-            tracing::warn!("Rejected pairing from {}: Too many pending attempts", remote_addr);
+            tracing::warn!(
+                "Rejected pairing from {}: Too many pending attempts",
+                remote_addr
+            );
             return Err(anyhow!("Too many pending attempts"));
         }
     };

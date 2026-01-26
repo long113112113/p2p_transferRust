@@ -95,11 +95,6 @@ mod tests {
         // 7. Check file size on disk
         let metadata = tokio::fs::metadata(&target_file).await.expect("File not found");
 
-        // FAIL IF size > claimed_size
-        // With current bug, this assertion will likely fail if we strictly check equality,
-        // or pass if we check <= but the bug allows >.
-        // We want to prove it IS > claimed_size currently.
-
         println!("File size on disk: {}", metadata.len());
         assert!(metadata.len() <= claimed_size, "File on disk ({}) is larger than claimed size ({})", metadata.len(), claimed_size);
 

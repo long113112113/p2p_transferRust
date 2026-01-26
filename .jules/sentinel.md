@@ -34,7 +34,8 @@
 **Vulnerability:** The pairing verification handshake allowed unlimited concurrent attempts. Since the 4-digit code is generated per session, an attacker could spawn thousands of concurrent connections to brute-force the code by statistical probability or resource exhaustion.
 **Learning:** Short codes (like 4-digit PINs) rely entirely on rate limiting for security. In an async server, "concurrency" is the enemy of rate limiting if not explicitly managed. Generating a new code per connection does not protect against brute force if the attacker can open enough connections to guess one correctly.
 **Prevention:** Implement strict global concurrency limits for sensitive handshakes using atomic counters or semaphores. Combine this with artificial delays to drastically reduce the effective guess rate.
-## 2026-06-18 - Unbounded File Write in WebSocket Upload
-**Vulnerability:** The WebSocket upload handler trusted the client's data stream implicitly. A malicious client could declare a small file size but send a massive amount of data, causing the server to write more bytes than declared to disk, leading to integrity violations and potential disk exhaustion.
-**Learning:** In stream-based protocols (like WebSockets), never trust the client to stop sending data when the declared size is reached. Always calculate remaining bytes and strictly enforce the limit on the server side by truncating or rejecting excess data.
-**Prevention:** Track `received_bytes` against `expected_size` on every chunk. Use `saturating_sub` to calculate remaining allowance and slice incoming buffers to ensure no more than `remaining` bytes are ever written.
+
+## 2026-01-26 - WebSocket Upload Stream Overflow
+**Vulnerability:** The WebSocket upload handler trusted the declared `file_size` for loop termination but wrote the full content of incoming chunks to disk. An attacker could declare a small size but send large chunks, causing the server to write more data than permitted before the check triggered.
+**Learning:** In streaming data handlers, checking limits *after* processing a chunk is insufficient. Data must be sliced or validated *before* being written to persistent storage or processed.
+**Prevention:** Always calculate `remaining_bytes` and slice the input buffer (`min(chunk_size, remaining)`) before performing any write operations.
