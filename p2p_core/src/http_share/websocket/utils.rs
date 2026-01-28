@@ -28,13 +28,19 @@ pub async fn wait_for_file_info(
 
     let result = timeout(duration, async {
         while let Some(msg) = receiver.next().await {
-            if let Ok(Message::Text(text)) = msg
-                && let Ok(ClientMessage::FileInfo {
-                    file_name,
-                    file_size,
-                }) = serde_json::from_str(&text)
-            {
-                return Some((file_name, file_size));
+            match msg {
+                Ok(Message::Text(text)) => {
+                    // Enforce strict protocol: first message must be valid FileInfo
+                    match serde_json::from_str::<ClientMessage>(&text) {
+                        Ok(ClientMessage::FileInfo {
+                            file_name,
+                            file_size,
+                        }) => return Some((file_name, file_size)),
+                        _ => return None, // Invalid JSON or wrong message type
+                    }
+                }
+                Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => continue,
+                _ => return None, // Unexpected message type (Binary, Close, etc.) or Error
             }
         }
         None

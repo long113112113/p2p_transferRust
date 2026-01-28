@@ -435,4 +435,83 @@ mod tests {
             panic!("Expected UploadRequest event");
         }
     }
+
+    #[tokio::test]
+    async fn test_websocket_handshake_strictness() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::connect_async;
+        use tokio_tungstenite::tungstenite::Message;
+
+        // Setup
+        let token = "test_token_strict";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from(".");
+
+        // Create router manually to get the port
+        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Spawn server
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+
+        // Give server a moment to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let ws_url = format!("ws://127.0.0.1:{}/{}/ws", port, token);
+
+        // Connect client
+        let (ws_stream, _) = connect_async(&ws_url).await.expect("Failed to connect");
+        let (mut write, mut read) = ws_stream.split();
+
+        // Send INVALID message (not FileInfo)
+        write
+            .send(Message::Text("this is not json".into()))
+            .await
+            .unwrap();
+
+        // Expect immediate closure or error
+        // The server currently (before fix) ignores it and loops until timeout (10s)
+        // After fix, it should return None/Error immediately.
+
+        let result = tokio::time::timeout(tokio::time::Duration::from_millis(2000), read.next()).await;
+
+        match result {
+            Ok(Some(Ok(msg))) => {
+                // We expect an error message or close frame
+                if let Message::Close(_) = msg {
+                    // Good
+                } else if let Message::Text(text) = msg {
+                    // "Expected file_info message" is sent if wait_for_file_info returns None
+                    // "Handshake timed out" is sent if timeout
+                    // We expect "Expected file_info message" or immediate closure.
+                    // If we got "Handshake timed out", it means it waited too long (but my timeout is 2s, handshake is 10s).
+                    // So if we get a message within 2s, it's likely "Expected file_info message".
+                    assert!(
+                        text.contains("Expected file_info message"),
+                        "Unexpected message: {}",
+                        text
+                    );
+                } else {
+                    panic!("Unexpected message type: {:?}", msg);
+                }
+            }
+            Ok(Some(Err(e))) => panic!("WebSocket error: {}", e),
+            Ok(None) => {
+                // Stream closed
+            },
+            Err(_) => {
+                panic!("Timeout! Server did not close connection on invalid input.");
+            }
+        }
+    }
 }
