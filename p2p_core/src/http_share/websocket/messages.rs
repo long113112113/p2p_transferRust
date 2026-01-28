@@ -11,12 +11,6 @@ pub const USER_RESPONSE_TIMEOUT_SECS: u64 = 60;
 /// Timeout for WebSocket handshake (10 seconds)
 pub const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
 
-/// Maximum filename length (255 bytes)
-pub const MAX_FILENAME_LENGTH: usize = 255;
-
-/// Maximum file size (10 GB)
-pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
-
 pub const MAX_PENDING_UPLOADS: usize = 10;
 
 /// Messages from client to server
@@ -49,6 +43,7 @@ mod tests {
 
     #[test]
     fn test_constants() {
+        use crate::transfer::constants::{MAX_FILENAME_LENGTH, MAX_FILE_SIZE};
         assert_eq!(MAX_FILENAME_LENGTH, 255);
         assert!(MAX_FILE_SIZE > 0);
         assert_eq!(MAX_PENDING_UPLOADS, 10);

@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 use super::constants::BUFFER_SIZE;
 use super::hash::compute_file_hash;
-use super::utils::{open_secure_file, report_progress, sanitize_file_name};
+use super::utils::{open_secure_file, report_progress, sanitize_file_name, validate_transfer_info};
 
 /// Receive a single file from the stream
 pub async fn receive_file(
@@ -16,7 +16,14 @@ pub async fn receive_file(
     event_tx: &mpsc::Sender<AppEvent>,
     mut file_info: FileInfo,
 ) -> Result<()> {
+    // Enforce strict file size and name limits to prevent DoS
+    if let Err(e) = validate_transfer_info(&file_info.file_name, file_info.file_size) {
+        let _ = event_tx.send(AppEvent::Error(e.to_string())).await;
+        return Err(e);
+    }
+
     file_info.file_name = sanitize_file_name(&file_info.file_name);
+
     let _ = event_tx
         .send(AppEvent::Status(format!(
             "Receiving: {} ({} bytes)",

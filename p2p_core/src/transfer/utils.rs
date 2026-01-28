@@ -1,4 +1,5 @@
 use crate::AppEvent;
+use crate::transfer::constants::{MAX_FILENAME_LENGTH, MAX_FILE_SIZE};
 use anyhow::Result;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
@@ -6,6 +7,27 @@ use std::path::Path;
 use std::time::Instant;
 use tokio::fs::{File, OpenOptions};
 use tokio::sync::mpsc;
+
+/// Validate file info against security limits (size and name length)
+pub fn validate_transfer_info(file_name: &str, file_size: u64) -> Result<()> {
+    if file_size > MAX_FILE_SIZE {
+        return Err(anyhow::anyhow!(
+            "File rejected: {} ({} GB) exceeds maximum allowed size of {} GB",
+            file_name,
+            file_size / (1024 * 1024 * 1024),
+            MAX_FILE_SIZE / (1024 * 1024 * 1024)
+        ));
+    }
+
+    if file_name.len() > MAX_FILENAME_LENGTH {
+        return Err(anyhow::anyhow!(
+            "File rejected: Filename too long ({} chars, max {})",
+            file_name.len(),
+            MAX_FILENAME_LENGTH
+        ));
+    }
+    Ok(())
+}
 
 /// Open a file with secure permissions (0o600 on Unix) for writing
 pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File> {
@@ -88,6 +110,19 @@ pub async fn report_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_transfer_info() {
+        // Valid case
+        assert!(validate_transfer_info("valid.txt", 1024).is_ok());
+
+        // Invalid size
+        assert!(validate_transfer_info("huge.txt", MAX_FILE_SIZE + 1).is_err());
+
+        // Invalid name length
+        let long_name = "a".repeat(MAX_FILENAME_LENGTH + 1);
+        assert!(validate_transfer_info(&long_name, 1024).is_err());
+    }
 
     #[test]
     fn test_sanitize_file_name() {
