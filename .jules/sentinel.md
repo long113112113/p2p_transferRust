@@ -39,3 +39,8 @@
 **Vulnerability:** The WebSocket upload handler trusted the declared `file_size` for loop termination but wrote the full content of incoming chunks to disk. An attacker could declare a small size but send large chunks, causing the server to write more data than permitted before the check triggered.
 **Learning:** In streaming data handlers, checking limits *after* processing a chunk is insufficient. Data must be sliced or validated *before* being written to persistent storage or processed.
 **Prevention:** Always calculate `remaining_bytes` and slice the input buffer (`min(chunk_size, remaining)`) before performing any write operations.
+
+## 2026-06-25 - Distributed Security Constants
+**Vulnerability:** Limits like `MAX_FILE_SIZE` were defined locally in the `http_share` module, leaving the P2P `transfer` module vulnerable to DoS attacks (disk exhaustion) as it lacked similar checks.
+**Learning:** Security constants (limits, timeouts) should be centralized, not module-specific. Parallel implementations of similar features (e.g., HTTP upload vs P2P transfer) often miss applying the same security controls.
+**Prevention:** Define global security constants in a shared `constants` module and enforce their usage across all relevant modules. Use shared validation helpers where possible.
