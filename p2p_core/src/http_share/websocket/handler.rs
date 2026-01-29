@@ -385,11 +385,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     // Send complete message
     let _ = sender
         .send(Message::Text(
-            serde_json::to_string(&ServerMessage::Complete {
-                saved_path: saved_path.clone(),
-            })
-            .unwrap()
-            .into(),
+            serde_json::to_string(&ServerMessage::Complete)
+                .unwrap()
+                .into(),
         ))
         .await;
 

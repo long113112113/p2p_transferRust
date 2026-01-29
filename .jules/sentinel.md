@@ -44,3 +44,8 @@
 **Vulnerability:** Limits like `MAX_FILE_SIZE` were defined locally in the `http_share` module, leaving the P2P `transfer` module vulnerable to DoS attacks (disk exhaustion) as it lacked similar checks.
 **Learning:** Security constants (limits, timeouts) should be centralized, not module-specific. Parallel implementations of similar features (e.g., HTTP upload vs P2P transfer) often miss applying the same security controls.
 **Prevention:** Define global security constants in a shared `constants` module and enforce their usage across all relevant modules. Use shared validation helpers where possible.
+
+## 2026-06-25 - Information Disclosure in WebSocket Messages
+**Vulnerability:** The `ServerMessage::Complete` WebSocket message returned the full absolute path of the saved file to the client (`saved_path`), exposing the server's directory structure and username.
+**Learning:** Developers often return full object state (like paths) for debugging convenience or "completeness", forgetting that this data crosses a trust boundary to the client.
+**Prevention:** Review all data structures sent to clients (DTOs). Only include fields that are strictly necessary for the client's operation. Never include internal server paths.
