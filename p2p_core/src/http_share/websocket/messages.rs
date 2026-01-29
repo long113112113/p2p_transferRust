@@ -32,7 +32,7 @@ pub enum ServerMessage {
     /// Progress update
     Progress { received_bytes: u64 },
     /// Upload complete
-    Complete { saved_path: String },
+    Complete,
     /// Error occurred
     Error { message: String },
 }
