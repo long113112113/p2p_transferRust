@@ -1,4 +1,5 @@
 use crate::FileInfo;
+use crate::transfer::constants::MAX_MSG_SIZE;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +43,14 @@ pub async fn recv_msg(recv: &mut quinn::RecvStream) -> Result<TransferMsg> {
     let mut len_buf = [0u8; 4];
     recv.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
+
+    if len > MAX_MSG_SIZE {
+        return Err(anyhow::anyhow!(
+            "Message too large: {} bytes (max {})",
+            len,
+            MAX_MSG_SIZE
+        ));
+    }
 
     let mut buf = vec![0u8; len];
     recv.read_exact(&mut buf).await?;
