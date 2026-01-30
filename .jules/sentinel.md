@@ -49,3 +49,8 @@
 **Vulnerability:** The `ServerMessage::Complete` WebSocket message returned the full absolute path of the saved file to the client (`saved_path`), exposing the server's directory structure and username.
 **Learning:** Developers often return full object state (like paths) for debugging convenience or "completeness", forgetting that this data crosses a trust boundary to the client.
 **Prevention:** Review all data structures sent to clients (DTOs). Only include fields that are strictly necessary for the client's operation. Never include internal server paths.
+
+## 2026-07-09 - DoS via Unbounded Length Prefix
+**Vulnerability:** The custom P2P protocol read a 4-byte length prefix and immediately allocated a buffer of that size (`vec![0u8; len]`), allowing an attacker to cause an Out-Of-Memory (OOM) crash by sending a 4GB length claim.
+**Learning:** Never allocate memory based solely on untrusted input size. Even if you "read" the size, the sender can lie. This is a classic DoS vector in binary protocols.
+**Prevention:** Enforce a strict `MAX_MSG_SIZE` limit (e.g., 64KB) *before* performing any allocation based on a length prefix read from the network.
