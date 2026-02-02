@@ -70,13 +70,83 @@ pub fn generate_self_signed_cert()
     Ok((vec![cert_der], key))
 }
 
+/// Sanitize file name to prevent path traversal attacks and ensure safety
 pub fn sanitize_file_name(file_name: &str) -> String {
-    Path::new(file_name)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown_file")
-        .to_string()
+    // 1. Split by both / and \ to handle cross-platform paths
+    // We take the last component to ignore directories
+    let file_name = file_name
+        .split(|c| c == '/' || c == '\\')
+        .last()
+        .unwrap_or("unknown_file");
+
+    if file_name.is_empty() {
+        return "unknown_file".to_string();
+    }
+
+    // 2. Filter characters
+    // Remove control characters and explicit path separators (though split should handle them)
+    let mut clean_name: String = file_name.chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\')
+        .collect();
+
+    // 3. Check for Windows reserved names
+    // See: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+    let reserved_names = [
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    ];
+
+    // Check strict equality ignoring case
+    if reserved_names.iter().any(|&r| clean_name.eq_ignore_ascii_case(r)) {
+        return "unknown_file".to_string();
+    }
+
+    // 4. Check for ".." and "."
+    if clean_name == ".." || clean_name == "." || clean_name.trim().is_empty() {
+        return "unknown_file".to_string();
+    }
+
+    // 5. Truncate to maximum length
+    if clean_name.len() > MAX_FILENAME_LENGTH {
+        // Try to preserve extension
+        if let Some(idx) = clean_name.rfind('.') {
+            let ext_len = clean_name.len() - idx;
+            // Only try to save extension if it's reasonable length
+            if ext_len < 20 && ext_len < MAX_FILENAME_LENGTH {
+                let base_len = MAX_FILENAME_LENGTH - ext_len;
+                let mut base = clean_name[..idx].to_string();
+
+                // Truncate base safely
+                let mut cutoff = base_len;
+                while !base.is_char_boundary(cutoff) {
+                    cutoff -= 1;
+                }
+                base.truncate(cutoff);
+
+                base.push_str(&clean_name[idx..]);
+                clean_name = base;
+            } else {
+                // Extension too long, just truncate safely
+                let mut cutoff = MAX_FILENAME_LENGTH;
+                while !clean_name.is_char_boundary(cutoff) {
+                    cutoff -= 1;
+                }
+                clean_name.truncate(cutoff);
+            }
+        } else {
+            // No extension, truncate safely
+            let mut cutoff = MAX_FILENAME_LENGTH;
+            while !clean_name.is_char_boundary(cutoff) {
+                cutoff -= 1;
+            }
+            clean_name.truncate(cutoff);
+        }
+    }
+
+    clean_name
 }
+
 /// Report transfer progress to the event channel
 pub async fn report_progress(
     event_tx: &mpsc::Sender<AppEvent>,
@@ -125,14 +195,74 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_file_name() {
+    fn test_sanitize_file_name_basic() {
         assert_eq!(sanitize_file_name("normal_file.txt"), "normal_file.txt");
         assert_eq!(sanitize_file_name("path/to/file.txt"), "file.txt");
         assert_eq!(sanitize_file_name("/absolute/path/to/file.txt"), "file.txt");
+    }
+
+    #[test]
+    fn test_sanitize_file_name_windows_path() {
+        assert_eq!(sanitize_file_name("path\\to\\file.txt"), "file.txt");
+        assert_eq!(sanitize_file_name("C:\\Windows\\System32\\calc.exe"), "calc.exe");
+    }
+
+    #[test]
+    fn test_sanitize_file_name_traversal() {
         assert_eq!(sanitize_file_name("../../etc/passwd"), "passwd");
+        assert_eq!(sanitize_file_name("..\\..\\Windows\\System32\\cmd.exe"), "cmd.exe");
+        assert_eq!(sanitize_file_name("folder/../file.txt"), "file.txt");
+        // Mixed separators
+        assert_eq!(sanitize_file_name("folder\\../file.txt"), "file.txt");
+    }
+
+    #[test]
+    fn test_sanitize_file_name_dangerous() {
         assert_eq!(sanitize_file_name(".."), "unknown_file");
+        assert_eq!(sanitize_file_name("."), "unknown_file");
         assert_eq!(sanitize_file_name(""), "unknown_file");
-        assert_eq!(sanitize_file_name("foo/../bar.txt"), "bar.txt");
+        assert_eq!(sanitize_file_name("/"), "unknown_file");
+        assert_eq!(sanitize_file_name("\\"), "unknown_file");
+    }
+
+    #[test]
+    fn test_sanitize_file_name_reserved() {
+        assert_eq!(sanitize_file_name("CON"), "unknown_file");
+        assert_eq!(sanitize_file_name("con"), "unknown_file");
+        assert_eq!(sanitize_file_name("NUL"), "unknown_file");
+        assert_eq!(sanitize_file_name("com1"), "unknown_file");
+        // Allowed
+        assert_eq!(sanitize_file_name("concert.txt"), "concert.txt");
+    }
+
+    #[test]
+    fn test_sanitize_file_name_length() {
+        let long_name = "a".repeat(300) + ".txt";
+        let sanitized = sanitize_file_name(&long_name);
+        assert!(sanitized.len() <= MAX_FILENAME_LENGTH);
+        assert!(sanitized.ends_with(".txt"));
+
+        let long_no_ext = "a".repeat(300);
+        let sanitized_no_ext = sanitize_file_name(&long_no_ext);
+        assert!(sanitized_no_ext.len() <= MAX_FILENAME_LENGTH);
+    }
+
+    #[test]
+    fn test_sanitize_file_name_unicode_truncate() {
+        // Create a string that would cause panic if truncated in the middle of a char
+        // 🦀 is 4 bytes.
+        let crab = "🦀";
+        let mut long_unicode = crab.repeat(100); // 400 bytes
+        long_unicode.push_str(".txt");
+
+        let sanitized = sanitize_file_name(&long_unicode);
+        assert!(sanitized.len() <= MAX_FILENAME_LENGTH);
+        assert!(sanitized.ends_with(".txt"));
+
+        // Ensure valid UTF-8 (String does this automatically but good to know we didn't crash)
+        // Verify we didn't chop a crab in half
+        let base = sanitized.trim_end_matches(".txt");
+        assert!(base.chars().last().unwrap() == '🦀');
     }
 
     #[tokio::test]

@@ -1,6 +1,7 @@
 use anyhow::Result;
+use p2p_core::transfer::utils::sanitize_file_name;
 use p2p_core::{AppEvent, FileInfo};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
@@ -214,15 +215,6 @@ pub async fn receive_file(
         .await;
 
     Ok(())
-}
-
-/// Sanitize file name to prevent path traversal attacks
-fn sanitize_file_name(file_name: &str) -> String {
-    Path::new(file_name)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown_file")
-        .to_string()
 }
 
 /// Report transfer progress to the event channel
