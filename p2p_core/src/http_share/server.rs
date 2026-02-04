@@ -483,7 +483,8 @@ mod tests {
         // The server currently (before fix) ignores it and loops until timeout (10s)
         // After fix, it should return None/Error immediately.
 
-        let result = tokio::time::timeout(tokio::time::Duration::from_millis(2000), read.next()).await;
+        let result =
+            tokio::time::timeout(tokio::time::Duration::from_millis(2000), read.next()).await;
 
         match result {
             Ok(Some(Ok(msg))) => {
@@ -508,7 +509,7 @@ mod tests {
             Ok(Some(Err(e))) => panic!("WebSocket error: {}", e),
             Ok(None) => {
                 // Stream closed
-            },
+            }
             Err(_) => {
                 panic!("Timeout! Server did not close connection on invalid input.");
             }

@@ -49,3 +49,8 @@
 **Vulnerability:** The `ServerMessage::Complete` WebSocket message returned the full absolute path of the saved file to the client (`saved_path`), exposing the server's directory structure and username.
 **Learning:** Developers often return full object state (like paths) for debugging convenience or "completeness", forgetting that this data crosses a trust boundary to the client.
 **Prevention:** Review all data structures sent to clients (DTOs). Only include fields that are strictly necessary for the client's operation. Never include internal server paths.
+
+## 2026-06-25 - Unbounded Active State Resource Exhaustion
+**Vulnerability:** While pending uploads were limited, the system had no limit on the number of *active* concurrent uploads. An attacker could initiate many uploads, wait for acceptance, and then stall the transfers, exhausting server resources (file descriptors, memory).
+**Learning:** Limiting the "queue" (pending state) is not enough. The "processing" state (active) also consumes resources and must be bounded, especially when handling long-running operations like file transfers.
+**Prevention:** Implement distinct concurrency limits for both pending and active states. Use atomic counters or semaphores to enforce global limits on active processing tasks.
