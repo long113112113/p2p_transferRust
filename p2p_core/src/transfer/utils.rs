@@ -1,5 +1,5 @@
 use crate::AppEvent;
-use crate::transfer::constants::{MAX_FILENAME_LENGTH, MAX_FILE_SIZE};
+use crate::transfer::constants::{MAX_FILE_SIZE, MAX_FILENAME_LENGTH};
 use anyhow::Result;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};

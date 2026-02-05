@@ -54,6 +54,10 @@
 **Learning:** Developers often return full object state (like paths) for debugging convenience or "completeness", forgetting that this data crosses a trust boundary to the client.
 **Prevention:** Review all data structures sent to clients (DTOs). Only include fields that are strictly necessary for the client's operation. Never include internal server paths.
 
+## 2026-06-25 - Unbounded Active State Resource Exhaustion
+**Vulnerability:** While pending uploads were limited, the system had no limit on the number of *active* concurrent uploads. An attacker could initiate many uploads, wait for acceptance, and then stall the transfers, exhausting server resources (file descriptors, memory).
+**Learning:** Limiting the "queue" (pending state) is not enough. The "processing" state (active) also consumes resources and must be bounded, especially when handling long-running operations like file transfers.
+**Prevention:** Implement distinct concurrency limits for both pending and active states. Use atomic counters or semaphores to enforce global limits on active processing tasks.
 ## 2026-07-09 - DoS via Unbounded Length Prefix
 **Vulnerability:** The custom P2P protocol read a 4-byte length prefix and immediately allocated a buffer of that size (`vec![0u8; len]`), allowing an attacker to cause an Out-Of-Memory (OOM) crash by sending a 4GB length claim.
 **Learning:** Never allocate memory based solely on untrusted input size. Even if you "read" the size, the sender can lie. This is a classic DoS vector in binary protocols.

@@ -2,6 +2,7 @@
 
 use super::messages::MAX_PENDING_UPLOADS;
 use crate::AppEvent;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tokio::sync::{RwLock, mpsc, oneshot};
 
@@ -15,12 +16,15 @@ pub struct PendingUpload {
 pub struct UploadState {
     /// Pending uploads waiting for user approval
     pub pending: RwLock<HashMap<String, PendingUpload>>,
+    /// Number of active concurrent uploads
+    pub active_count: AtomicUsize,
 }
 
 impl UploadState {
     pub fn new() -> Self {
         Self {
             pending: RwLock::new(HashMap::new()),
+            active_count: AtomicUsize::new(0),
         }
     }
 
@@ -45,6 +49,17 @@ pub struct WebSocketState {
     pub event_tx: mpsc::Sender<AppEvent>,
     pub upload_state: Arc<UploadState>,
     pub download_dir: PathBuf,
+}
+
+/// Guard for active upload count
+pub struct ActiveUploadGuard {
+    pub state: Arc<UploadState>,
+}
+
+impl Drop for ActiveUploadGuard {
+    fn drop(&mut self) {
+        self.state.active_count.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// Respond to an upload request

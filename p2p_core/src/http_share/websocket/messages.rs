@@ -13,6 +13,9 @@ pub const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
 
 pub const MAX_PENDING_UPLOADS: usize = 10;
 
+/// Maximum number of concurrent active uploads
+pub const MAX_ACTIVE_UPLOADS: usize = 5;
+
 /// Messages from client to server
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -43,9 +46,10 @@ mod tests {
 
     #[test]
     fn test_constants() {
-        use crate::transfer::constants::{MAX_FILENAME_LENGTH, MAX_FILE_SIZE};
+        use crate::transfer::constants::{MAX_FILE_SIZE, MAX_FILENAME_LENGTH};
         assert_eq!(MAX_FILENAME_LENGTH, 255);
         assert!(MAX_FILE_SIZE > 0);
         assert_eq!(MAX_PENDING_UPLOADS, 10);
+        assert_eq!(MAX_ACTIVE_UPLOADS, 5);
     }
 }
