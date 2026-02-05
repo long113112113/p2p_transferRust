@@ -1,7 +1,7 @@
 use anyhow::Result;
 use p2p_core::{AppEvent, FileInfo};
+use p2p_core::transfer::utils::{open_secure_file, validate_transfer_info};
 use std::path::{Path, PathBuf};
-use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -24,9 +24,26 @@ pub async fn receive_file(
     recv: &mut iroh::endpoint::RecvStream,
     download_dir: &PathBuf,
     event_tx: &mpsc::Sender<AppEvent>,
-    file_info: FileInfo,
+    mut file_info: FileInfo,
 ) -> Result<()> {
+    // Security check: Validate file size and name length
+    if let Err(e) = validate_transfer_info(&file_info.file_name, file_info.file_size) {
+        let err_msg = e.to_string();
+        tracing::error!("File validation failed: {}", err_msg);
+        let _ = send_msg(
+            send,
+            &WanTransferMsg::Error {
+                message: err_msg.clone(),
+            },
+        )
+        .await;
+        let _ = event_tx.send(AppEvent::Error(err_msg.clone())).await;
+        return Err(e);
+    }
+
     let file_name = sanitize_file_name(&file_info.file_name);
+    // Update file_info name with sanitized version
+    file_info.file_name = file_name.clone();
     let file_size = file_info.file_size;
 
     info!("Receiving file: {} ({} bytes)", file_name, file_size);
@@ -63,15 +80,8 @@ pub async fn receive_file(
 
     send_msg(send, &WanTransferMsg::ResumeInfo { offset }).await?;
 
-    let mut file = if offset > 0 {
-        tokio::fs::OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(&file_path)
-            .await?
-    } else {
-        File::create(&file_path).await?
-    };
+    // Use open_secure_file to ensure secure permissions (0o600 on Unix)
+    let mut file = open_secure_file(&file_path, offset).await?;
 
     let mut received: u64 = offset;
     let mut buffer = vec![0u8; BUFFER_SIZE];
