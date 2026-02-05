@@ -71,11 +71,63 @@ pub fn generate_self_signed_cert()
 }
 
 pub fn sanitize_file_name(file_name: &str) -> String {
-    Path::new(file_name)
+    // Normalize backslashes to forward slashes to ensure Path::file_name works
+    // consistently across platforms (especially Unix treating \ as a normal char)
+    let normalized = file_name.replace('\\', "/");
+
+    let name = Path::new(&normalized)
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or("unknown_file")
-        .to_string()
+        .unwrap_or("unknown_file");
+
+    // Replace invalid characters:
+    // - Control characters
+    // - Windows reserved chars: < > : " / \ | ? *
+    // (Note: / and \ are already handled by file_name/replace, but strictly speaking < > : " | ? * are valid on Linux but not Windows)
+    // We choose to be conservative and replace them to ensure files are portable.
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || "<>:\"|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+
+    let mut result = sanitized;
+
+    // Handle empty or reserved names
+    if result.trim().is_empty() || result == "." || result == ".." {
+        result = "unknown_file".to_string();
+    }
+
+    // Windows reserved filenames (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    // We'll just prefix them with _ if they match exactly (case-insensitive)
+    let reserved = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+
+    // Check if stem matches reserved (e.g. CON.txt is also invalid on Windows)
+    let path = Path::new(&result);
+    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+        if reserved.iter().any(|&r| stem.eq_ignore_ascii_case(r)) {
+            result = format!("_{}", result);
+        }
+    }
+
+    // Truncate to MAX_FILENAME_LENGTH
+    if result.len() > MAX_FILENAME_LENGTH {
+        let mut end = MAX_FILENAME_LENGTH;
+        while !result.is_char_boundary(end) {
+            end -= 1;
+        }
+        result.truncate(end);
+    }
+
+    result
 }
 /// Report transfer progress to the event channel
 pub async fn report_progress(
@@ -133,6 +185,25 @@ mod tests {
         assert_eq!(sanitize_file_name(".."), "unknown_file");
         assert_eq!(sanitize_file_name(""), "unknown_file");
         assert_eq!(sanitize_file_name("foo/../bar.txt"), "bar.txt");
+
+        // Windows paths on Unix
+        assert_eq!(sanitize_file_name("..\\..\\windows\\system32"), "system32");
+        assert_eq!(sanitize_file_name("C:\\Windows\\System32\\calc.exe"), "calc.exe");
+
+        // Reserved characters
+        assert_eq!(sanitize_file_name("foo:bar"), "foo_bar");
+        assert_eq!(sanitize_file_name("foo<bar"), "foo_bar");
+        assert_eq!(sanitize_file_name("foo*bar"), "foo_bar");
+
+        // Reserved filenames
+        assert_eq!(sanitize_file_name("CON"), "_CON");
+        assert_eq!(sanitize_file_name("prn.txt"), "_prn.txt");
+        assert_eq!(sanitize_file_name("aux"), "_aux");
+
+        // Truncation
+        let long_name = "a".repeat(300);
+        let sanitized = sanitize_file_name(&long_name);
+        assert_eq!(sanitized.len(), MAX_FILENAME_LENGTH);
     }
 
     #[tokio::test]

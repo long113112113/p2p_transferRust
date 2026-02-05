@@ -72,10 +72,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     }
 
     // Sanitize filename to prevent directory traversal
-    let file_name = std::path::Path::new(&raw_file_name)
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unknown_file.bin".to_string());
+    let file_name = crate::transfer::utils::sanitize_file_name(&raw_file_name);
     // Use full UUID entropy (128 bits) instead of 8 chars (32 bits)
     // to prevent brute-force attacks on request tokens.
     let request_id = Uuid::new_v4().simple().to_string();
