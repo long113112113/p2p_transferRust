@@ -71,11 +71,48 @@ pub fn generate_self_signed_cert()
 }
 
 pub fn sanitize_file_name(file_name: &str) -> String {
-    Path::new(file_name)
-        .file_name()
+    // 1. Get the last component using string splitting to be OS-agnostic
+    // Split by / and \ and take the last part
+    let file_name = file_name
+        .rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or(file_name);
+
+    // 2. Filter characters (allow alphanum, space, ., -, _, (, ), [, ])
+    // Disallow control characters, nulls, etc.
+    // Also explicitly remove any remaining / or \ just in case
+    let sanitized: String = file_name
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\')
+        .collect();
+
+    // 3. Trim
+    let sanitized = sanitized.trim().to_string();
+
+    // 4. Handle reserved names (Windows) - Optional but good for defense in depth
+    // CON, PRN, AUX, NUL, COM1-9, LPT1-9
+    let upper = sanitized.to_ascii_uppercase();
+    let reserved = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+
+    // Check if it exactly matches or matches name with extension (e.g. CON.txt is invalid on Windows too)
+    let stem = std::path::Path::new(&sanitized)
+        .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("unknown_file")
-        .to_string()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+
+    if reserved.contains(&stem.as_str()) || reserved.contains(&upper.as_str()) {
+        return format!("_{}", sanitized);
+    }
+
+    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
+        return "unknown_file.bin".to_string();
+    }
+
+    sanitized
 }
 /// Report transfer progress to the event channel
 pub async fn report_progress(
@@ -129,10 +166,32 @@ mod tests {
         assert_eq!(sanitize_file_name("normal_file.txt"), "normal_file.txt");
         assert_eq!(sanitize_file_name("path/to/file.txt"), "file.txt");
         assert_eq!(sanitize_file_name("/absolute/path/to/file.txt"), "file.txt");
+        // Cross-platform separators
+        assert_eq!(
+            sanitize_file_name("path\\to\\windows\\file.txt"),
+            "file.txt"
+        );
+        assert_eq!(sanitize_file_name("mixed/path\\to/file.txt"), "file.txt");
+
         assert_eq!(sanitize_file_name("../../etc/passwd"), "passwd");
-        assert_eq!(sanitize_file_name(".."), "unknown_file");
-        assert_eq!(sanitize_file_name(""), "unknown_file");
+        assert_eq!(sanitize_file_name(".."), "unknown_file.bin");
+        assert_eq!(sanitize_file_name("."), "unknown_file.bin");
+        assert_eq!(sanitize_file_name(""), "unknown_file.bin");
+        assert_eq!(sanitize_file_name("   "), "unknown_file.bin");
         assert_eq!(sanitize_file_name("foo/../bar.txt"), "bar.txt");
+
+        // Control characters
+        assert_eq!(sanitize_file_name("file\nname.txt"), "filename.txt");
+        assert_eq!(sanitize_file_name("file\0name.txt"), "filename.txt");
+
+        // Reserved names
+        assert_eq!(sanitize_file_name("CON"), "_CON");
+        assert_eq!(sanitize_file_name("con.txt"), "_con.txt");
+        assert_eq!(sanitize_file_name("LPT1"), "_LPT1");
+        assert_eq!(sanitize_file_name("aux"), "_aux");
+
+        // Unicode
+        assert_eq!(sanitize_file_name("文件.txt"), "文件.txt");
     }
 
     #[tokio::test]
