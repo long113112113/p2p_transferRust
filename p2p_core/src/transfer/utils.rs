@@ -78,12 +78,12 @@ pub fn sanitize_file_name(file_name: &str) -> String {
         .next()
         .unwrap_or(file_name);
 
-    // 2. Filter characters (allow alphanum, space, ., -, _, (, ), [, ])
-    // Disallow control characters, nulls, etc.
-    // Also explicitly remove any remaining / or \ just in case
+    // 2. Filter characters
+    // Disallow control characters, path separators, and Windows reserved characters (<>:"/\|?*)
+    // This blocklist approach ensures cross-platform compatibility while allowing most valid filenames.
     let sanitized: String = file_name
         .chars()
-        .filter(|c| !c.is_control() && *c != '/' && *c != '\\')
+        .filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c))
         .collect();
 
     // 3. Trim
@@ -192,6 +192,22 @@ mod tests {
 
         // Unicode
         assert_eq!(sanitize_file_name("文件.txt"), "文件.txt");
+    }
+
+    #[test]
+    fn test_sanitize_file_name_windows_chars() {
+        // These characters are invalid in Windows filenames
+        let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
+        for c in invalid_chars {
+            let name = format!("file{}name.txt", c);
+            let sanitized = sanitize_file_name(&name);
+
+            // The sanitized name should NOT contain the invalid character
+            // (except / and \ which are path separators and already handled by rsplit,
+            // but sanitize_file_name handles them again in the filter just in case)
+            assert!(!sanitized.contains(c), "Character '{}' was not filtered out from '{}'", c, sanitized);
+        }
     }
 
     #[tokio::test]
