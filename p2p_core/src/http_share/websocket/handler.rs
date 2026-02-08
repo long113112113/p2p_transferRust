@@ -1,6 +1,6 @@
 //! WebSocket connection handler
 
-use super::messages::{MAX_ACTIVE_UPLOADS, ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
+use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
 use super::state::{ActiveUploadGuard, WebSocketState};
 use super::utils::{cleanup_pending, create_secure_file, validate_file_info, wait_for_file_info};
 use crate::transfer::utils::sanitize_file_name;
@@ -8,7 +8,6 @@ use crate::AppEvent;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tokio::{io::AsyncWriteExt, sync::oneshot};
 use uuid::Uuid;
 
@@ -199,8 +198,8 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         return;
     }
 
-    // Check active limit
-    if state.upload_state.active_count.load(Ordering::SeqCst) >= MAX_ACTIVE_UPLOADS {
+    // Check active limit using atomic acquire
+    if !state.upload_state.try_acquire_active_slot() {
         let _ = sender
             .send(Message::Text(
                 serde_json::to_string(&ServerMessage::Rejected {
@@ -213,10 +212,6 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         return;
     }
 
-    state
-        .upload_state
-        .active_count
-        .fetch_add(1, Ordering::SeqCst);
     let _active_guard = ActiveUploadGuard {
         state: state.upload_state.clone(),
     };
