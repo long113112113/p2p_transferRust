@@ -62,3 +62,8 @@
 **Vulnerability:** The custom P2P protocol read a 4-byte length prefix and immediately allocated a buffer of that size (`vec![0u8; len]`), allowing an attacker to cause an Out-Of-Memory (OOM) crash by sending a 4GB length claim.
 **Learning:** Never allocate memory based solely on untrusted input size. Even if you "read" the size, the sender can lie. This is a classic DoS vector in binary protocols.
 **Prevention:** Enforce a strict `MAX_MSG_SIZE` limit (e.g., 64KB) *before* performing any allocation based on a length prefix read from the network.
+
+## 2024-05-24 - File Permission Persistence on Overwrite
+**Vulnerability:** The `create_secure_file` and `open_secure_file` functions relied on `OpenOptions::mode(0o600)` to set permissions. However, `mode` only applies when a *new* file is created. If the file already existed (even if truncated), the existing permissions were preserved, allowing pre-created world-readable files to remain insecure.
+**Learning:** `OpenOptions` flags like `create` and `truncate` handle file content but do not enforce metadata (permissions) on existing files. Security-critical file operations must explicitly set permissions on the open file handle to ensure the intended state.
+**Prevention:** Always use `file.set_permissions()` on the open file handle when creating or overwriting sensitive files, rather than relying solely on creation-time flags.

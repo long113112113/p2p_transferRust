@@ -42,7 +42,23 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
         options.mode(0o600);
     }
 
-    options.open(path).await
+    let file = options.open(path).await?;
+
+    // If starting a new file (offset == 0), ensure secure permissions
+    // This is necessary because mode() only applies to new files, not existing ones
+    if offset == 0 {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = file.metadata().await?.permissions();
+            if perms.mode() & 0o777 != 0o600 {
+                perms.set_mode(0o600);
+                file.set_permissions(perms).await?;
+            }
+        }
+    }
+
+    Ok(file)
 }
 
 /// Format transfer speed from bytes and elapsed time
@@ -219,6 +235,54 @@ mod tests {
                 permissions.mode() & 0o777,
                 0o600,
                 "File permissions should be 0o600"
+            );
+        }
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(&file_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_open_secure_file_overwrite_permissions() {
+        let temp_dir = std::env::temp_dir();
+        // Use a unique name
+        let file_path = temp_dir.join(format!("secure_overwrite_test_{}.txt", uuid::Uuid::new_v4()));
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        {
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .await
+                .expect("Failed to create initial file");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).await.unwrap();
+            }
+        }
+
+        // 2. Overwrite using open_secure_file (simulating new transfer)
+        let _file = open_secure_file(&file_path, 0)
+            .await
+            .expect("Failed to open secure file");
+
+        // 3. Verify permissions are now 0o600
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = tokio::fs::metadata(&file_path)
+                .await
+                .expect("Failed to get metadata");
+            let permissions = metadata.permissions();
+            assert_eq!(
+                permissions.mode() & 0o777,
+                0o600,
+                "File permissions should be reset to 0o600 upon overwrite"
             );
         }
 
