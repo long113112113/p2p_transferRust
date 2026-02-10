@@ -550,6 +550,101 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_csp_connect_src_strictness() {
+        // Setup
+        let token = "test_token_csp";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from(".");
+        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
+
+        let host = "example.com";
+
+        // Request with Host: example.com
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/{}", token))
+                    .header("Host", host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Verify CSP header
+        let csp = response
+            .headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        // Should contain specific host
+        assert!(
+            csp.contains(&format!("ws://{}", host)),
+            "CSP should allow ws://{{host}} but got: {}", csp
+        );
+        assert!(
+            csp.contains(&format!("wss://{}", host)),
+            "CSP should allow wss://{{host}} but got: {}", csp
+        );
+
+        // Should NOT contain wildcards
+        assert!(
+            !csp.contains(" ws: "),
+            "CSP should not contain wildcard 'ws:' but got: {}", csp
+        );
+        assert!(
+            !csp.contains(" wss: "),
+            "CSP should not contain wildcard 'wss:' but got: {}", csp
+        );
+    }
+
+    #[tokio::test]
+    async fn test_csp_injection_prevention() {
+        // Setup
+        let token = "test_token_csp_inject";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from(".");
+        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
+
+        // Malicious Host header attempting to inject strict-dynamic or unsafe-inline
+        let malicious_host = "evil.com; script-src 'unsafe-inline'";
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/{}", token))
+                    .header("Host", malicious_host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let csp = response
+            .headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        // Should NOT contain the injected host
+        assert!(
+            !csp.contains("evil.com"),
+            "CSP should not contain malicious host part but got: {}", csp
+        );
+
+        // Should fall back to localhost
+        assert!(
+            csp.contains("ws://localhost"),
+            "CSP should fall back to localhost for invalid host but got: {}", csp
+        );
+    }
 }
 
 #[cfg(test)]
