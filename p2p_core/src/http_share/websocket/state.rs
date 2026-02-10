@@ -1,6 +1,6 @@
 //! WebSocket state management
 
-use super::messages::MAX_PENDING_UPLOADS;
+use super::messages::{MAX_ACTIVE_UPLOADS, MAX_PENDING_UPLOADS};
 use crate::AppEvent;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
@@ -41,6 +41,19 @@ impl UploadState {
         }
         pending.insert(request_id, PendingUpload { response_tx });
         true
+    }
+
+    /// Try to acquire an active upload slot
+    pub fn try_acquire_active_slot(&self) -> bool {
+        self.active_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                if current < MAX_ACTIVE_UPLOADS {
+                    Some(current + 1)
+                } else {
+                    None
+                }
+            })
+            .is_ok()
     }
 }
 
@@ -97,5 +110,33 @@ mod tests {
         let (tx, _rx) = oneshot::channel();
         let added = state.try_add_request("req_retry".to_string(), tx).await;
         assert!(added, "Should accept request after space freed");
+    }
+
+    #[tokio::test]
+    async fn test_active_upload_limit_concurrency() {
+        let state = Arc::new(UploadState::new());
+        let mut handles = vec![];
+
+        // Spawn 20 tasks trying to acquire a slot (limit is 5)
+        for _ in 0..20 {
+            let s = state.clone();
+            handles.push(tokio::spawn(async move { s.try_acquire_active_slot() }));
+        }
+
+        let mut success_count = 0;
+        for h in handles {
+            if h.await.unwrap() {
+                success_count += 1;
+            }
+        }
+
+        assert_eq!(
+            success_count, MAX_ACTIVE_UPLOADS,
+            "Should exactly match MAX_ACTIVE_UPLOADS"
+        );
+        assert_eq!(
+            state.active_count.load(Ordering::SeqCst),
+            MAX_ACTIVE_UPLOADS
+        );
     }
 }
