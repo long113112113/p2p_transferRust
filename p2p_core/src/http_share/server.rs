@@ -58,37 +58,44 @@ async fn not_found_handler() -> (axum::http::StatusCode, Html<&'static str>) {
     (axum::http::StatusCode::NOT_FOUND, Html(NOT_FOUND_HTML))
 }
 
+/// Sanitize Host header to prevent injection
+fn sanitize_host(host: &str) -> String {
+    host.chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | ':' | '-' | '[' | ']'))
+        .collect()
+}
+
 /// Middleware to add security headers
 async fn add_security_headers(req: Request, next: Next) -> Response {
-    // Extract Host header to restrict WebSocket connections to origin
-    let raw_host = req
+    // Extract and sanitize Host header for dynamic CSP
+    let host = req
         .headers()
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
-        .unwrap_or("localhost");
+        .map(sanitize_host)
+        .unwrap_or_else(|| "self".to_string());
 
-    // Sanitize Host header to prevent CSP injection
-    // Only allow alphanumeric, dot, colon, hyphen, brackets (IPv6)
-    let host = if raw_host.chars().all(|c| {
-        c.is_ascii_alphanumeric() || c == '.' || c == ':' || c == '-' || c == '[' || c == ']'
-    }) {
-        raw_host.to_string()
+    // If host is "self" (fallback), we can't construct valid ws:// URL easily without knowing scheme/port,
+    // so we just fallback to 'self' which might break WS if scheme is different (http vs ws).
+    // But browsers usually send Host.
+    let connect_src = if host == "self" {
+        "connect-src 'self';".to_string()
     } else {
-        "localhost".to_string()
+        format!("connect-src 'self' ws://{} wss://{};", host, host)
     };
+
+    let csp = format!(
+        "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; {} img-src 'self' data:;",
+        connect_src
+    );
 
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
 
-    let csp = format!(
-        "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self' ws://{} wss://{}; img-src 'self' data:;",
-        host, host
-    );
-
-    if let Ok(csp_header) = HeaderValue::from_str(&csp) {
-        headers.insert(header::CONTENT_SECURITY_POLICY, csp_header);
+    if let Ok(csp_value) = HeaderValue::from_str(&csp) {
+        headers.insert(header::CONTENT_SECURITY_POLICY, csp_value);
     } else {
-        // Fallback should not happen due to sanitization, but good for safety
+        // Fallback if something goes wrong with formatting (unlikely due to sanitization)
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; img-src 'self' data:;"),
@@ -637,5 +644,59 @@ mod tests {
             csp.contains("ws://localhost"),
             "CSP should fall back to localhost for invalid host but got: {}", csp
         );
+    }
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_csp_connect_src_strictness() {
+        let token = "test_token_csp";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from(".");
+        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/{}", token))
+                    .header("Host", "127.0.0.1:8080")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let csp = response
+            .headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        // Assert STRICT state
+        // Should contain specific host
+        assert!(csp.contains("ws://127.0.0.1:8080"));
+        assert!(csp.contains("wss://127.0.0.1:8080"));
+
+        // Should NOT contain the old permissive wildcards
+        assert!(!csp.contains("ws: wss:"));
+    }
+
+    #[test]
+    fn test_sanitize_host() {
+        assert_eq!(sanitize_host("example.com"), "example.com");
+        assert_eq!(sanitize_host("localhost:8080"), "localhost:8080");
+        assert_eq!(sanitize_host("[::1]:8080"), "[::1]:8080");
+
+        // Injection attempts
+        assert_eq!(sanitize_host("example.com; script-src 'unsafe-inline'"), "example.comscript-srcunsafe-inline");
+        assert_eq!(sanitize_host("evil.com\r\nHeader: value"), "evil.comHeader:value");
     }
 }
