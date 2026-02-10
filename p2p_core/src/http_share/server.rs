@@ -60,9 +60,15 @@ async fn not_found_handler() -> (axum::http::StatusCode, Html<&'static str>) {
 
 /// Sanitize Host header to prevent injection
 fn sanitize_host(host: &str) -> String {
-    host.chars()
-        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | ':' | '-' | '[' | ']'))
-        .collect()
+    // If host contains any forbidden characters, fallback to safe default (localhost)
+    // instead of trying to strip them, which might leave a valid-looking but malicious host.
+    if host
+        .chars()
+        .any(|c| !c.is_alphanumeric() && !matches!(c, '.' | ':' | '-' | '[' | ']'))
+    {
+        return "localhost".to_string();
+    }
+    host.to_string()
 }
 
 /// Middleware to add security headers
@@ -695,8 +701,8 @@ mod security_tests {
         assert_eq!(sanitize_host("localhost:8080"), "localhost:8080");
         assert_eq!(sanitize_host("[::1]:8080"), "[::1]:8080");
 
-        // Injection attempts
-        assert_eq!(sanitize_host("example.com; script-src 'unsafe-inline'"), "example.comscript-srcunsafe-inline");
-        assert_eq!(sanitize_host("evil.com\r\nHeader: value"), "evil.comHeader:value");
+        // Injection attempts - Should fallback to localhost
+        assert_eq!(sanitize_host("example.com; script-src 'unsafe-inline'"), "localhost");
+        assert_eq!(sanitize_host("evil.com\r\nHeader: value"), "localhost");
     }
 }
