@@ -3,6 +3,8 @@ use anyhow::{Result, anyhow};
 use quinn::Endpoint;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::protocol::{TransferMsg, recv_msg, send_msg};
@@ -22,11 +24,13 @@ pub async fn run_server(
             match incoming.await {
                 Ok(connection) => {
                     let remote_addr = connection.remote_address();
+                    let is_authenticated = Arc::new(AtomicBool::new(false));
 
                     while let Ok((mut send_stream, mut recv_stream)) = connection.accept_bi().await
                     {
                         let event_tx = event_tx.clone();
                         let download_dir = download_dir.clone();
+                        let is_authenticated = is_authenticated.clone();
 
                         tokio::spawn(async move {
                             // Read first message to determine type
@@ -45,6 +49,7 @@ pub async fn run_server(
                                                 remote_addr,
                                                 endpoint_id,
                                                 peer_name,
+                                                &is_authenticated,
                                             )
                                             .await
                                             {
@@ -57,6 +62,23 @@ pub async fn run_server(
                                             }
                                         }
                                         TransferMsg::FileMetadata { info } => {
+                                            // Check authentication
+                                            if !is_authenticated.load(Ordering::SeqCst) {
+                                                tracing::warn!(
+                                                    "Rejected unauthenticated upload from {}",
+                                                    remote_addr
+                                                );
+                                                let _ = send_msg(
+                                                    &mut send_stream,
+                                                    &TransferMsg::VerificationFailed {
+                                                        message: "Unauthenticated transfer rejected"
+                                                            .to_string(),
+                                                    },
+                                                )
+                                                .await;
+                                                return;
+                                            }
+
                                             // Handle File Transfer
 
                                             if let Err(e) = receive_file(
@@ -115,9 +137,11 @@ async fn handle_verification_handshake(
     remote_addr: SocketAddr,
     endpoint_id: String,
     peer_name: String,
+    is_authenticated: &Arc<AtomicBool>,
 ) -> Result<()> {
     if pairing::is_paired(&endpoint_id) {
         send_msg(send, &TransferMsg::PairingAccepted).await?;
+        is_authenticated.store(true, Ordering::SeqCst);
         let _ = event_tx
             .send(AppEvent::PairingResult {
                 success: true,
@@ -173,6 +197,7 @@ async fn handle_verification_handshake(
             if received_code == code {
                 pairing::add_pairing(&endpoint_id, &peer_name);
                 send_msg(send, &TransferMsg::VerificationSuccess).await?;
+                is_authenticated.store(true, Ordering::SeqCst);
                 let _ = event_tx
                     .send(AppEvent::PairingResult {
                         success: true,

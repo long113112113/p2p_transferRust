@@ -60,9 +60,12 @@ async fn not_found_handler() -> (axum::http::StatusCode, Html<&'static str>) {
 
 /// Sanitize Host header to prevent injection
 fn sanitize_host(host: &str) -> String {
-    host.chars()
-        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | ':' | '-' | '[' | ']'))
-        .collect()
+    let allowed = |c: char| c.is_alphanumeric() || matches!(c, '.' | ':' | '-' | '[' | ']');
+    if host.chars().all(allowed) {
+        host.to_string()
+    } else {
+        "localhost".to_string()
+    }
 }
 
 /// Middleware to add security headers
@@ -696,7 +699,7 @@ mod security_tests {
         assert_eq!(sanitize_host("[::1]:8080"), "[::1]:8080");
 
         // Injection attempts
-        assert_eq!(sanitize_host("example.com; script-src 'unsafe-inline'"), "example.comscript-srcunsafe-inline");
-        assert_eq!(sanitize_host("evil.com\r\nHeader: value"), "evil.comHeader:value");
+        assert_eq!(sanitize_host("example.com; script-src 'unsafe-inline'"), "localhost");
+        assert_eq!(sanitize_host("evil.com\r\nHeader: value"), "localhost");
     }
 }
