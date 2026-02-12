@@ -10,3 +10,15 @@ pub const MAX_FILENAME_LENGTH: usize = 255;
 
 /// Maximum protocol message size (64KB) to prevent DoS via allocation
 pub const MAX_MSG_SIZE: usize = 64 * 1024;
+
+/// Timeout for pairing verification code input
+pub const DEFAULT_PAIRING_TIMEOUT_SECS: u64 = 60;
+
+pub fn get_pairing_timeout() -> std::time::Duration {
+    // Check environment variable for override (useful for tests)
+    let secs = std::env::var("P2P_PAIRING_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PAIRING_TIMEOUT_SECS);
+    std::time::Duration::from_secs(secs)
+}
