@@ -185,7 +185,27 @@ async fn handle_verification_handshake(
 
     send_msg(send, &TransferMsg::VerificationRequired).await?;
 
-    let msg = recv_msg(recv).await?;
+    // Enforce timeout on verification code reception to prevent DoS
+    // Default to 60 seconds if not specified
+    let timeout_secs = std::env::var("P2P_PAIRING_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(60);
+
+    let msg = match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        recv_msg(recv),
+    )
+    .await
+    {
+        Ok(res) => res?,
+        Err(_) => {
+            tracing::warn!("Pairing verification timed out for {}", remote_addr);
+            // This error will propagate up, causing the PairingGuard to be dropped
+            return Err(anyhow!("Verification timed out"));
+        }
+    };
+
     match msg {
         TransferMsg::VerificationCode {
             code: received_code,
