@@ -1,0 +1,134 @@
+   Compiling p2p_core v0.1.0 (/app/p2p_core)
+warning: unused import: `SinkExt`
+ --> p2p_core/tests/security_ws_dos.rs:2:20
+  |
+2 | use futures_util::{SinkExt, StreamExt};
+  |                    ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `p2p_core` (test "security_ws_dos") generated 1 warning (run `cargo fix --test "security_ws_dos" -p p2p_core` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.17s
+     Running tests/security_ws_dos.rs (target/debug/deps/security_ws_dos-ae8d50c40556fae8)
+
+running 1 test
+Testing with MAX_CONNECTIONS = 100
+DEBUG: handle_socket called. count before: 0
+DEBUG: handle_socket called. count before: 1
+DEBUG: handle_socket called. count before: 2
+DEBUG: handle_socket called. count before: 3
+DEBUG: handle_socket called. count before: 4
+DEBUG: handle_socket called. count before: 5
+DEBUG: handle_socket called. count before: 6
+DEBUG: handle_socket called. count before: 7
+DEBUG: handle_socket called. count before: 8
+DEBUG: handle_socket called. count before: 9
+DEBUG: handle_socket called. count before: 10
+DEBUG: handle_socket called. count before: 11
+DEBUG: handle_socket called. count before: 12
+DEBUG: handle_socket called. count before: 13
+DEBUG: handle_socket called. count before: 14
+DEBUG: handle_socket called. count before: 15
+DEBUG: handle_socket called. count before: 16
+DEBUG: handle_socket called. count before: 17
+DEBUG: handle_socket called. count before: 18
+DEBUG: handle_socket called. count before: 19
+DEBUG: handle_socket called. count before: 20
+DEBUG: handle_socket called. count before: 21
+DEBUG: handle_socket called. count before: 22
+DEBUG: handle_socket called. count before: 23
+DEBUG: handle_socket called. count before: 24
+DEBUG: handle_socket called. count before: 25
+DEBUG: handle_socket called. count before: 26
+DEBUG: handle_socket called. count before: 27
+DEBUG: handle_socket called. count before: 28
+DEBUG: handle_socket called. count before: 29
+DEBUG: handle_socket called. count before: 30
+DEBUG: handle_socket called. count before: 31
+DEBUG: handle_socket called. count before: 32
+DEBUG: handle_socket called. count before: 33
+DEBUG: handle_socket called. count before: 34
+DEBUG: handle_socket called. count before: 35
+DEBUG: handle_socket called. count before: 36
+DEBUG: handle_socket called. count before: 37
+DEBUG: handle_socket called. count before: 38
+DEBUG: handle_socket called. count before: 39
+DEBUG: handle_socket called. count before: 40
+DEBUG: handle_socket called. count before: 41
+DEBUG: handle_socket called. count before: 42
+DEBUG: handle_socket called. count before: 43
+DEBUG: handle_socket called. count before: 44
+DEBUG: handle_socket called. count before: 45
+DEBUG: handle_socket called. count before: 46
+DEBUG: handle_socket called. count before: 47
+DEBUG: handle_socket called. count before: 48
+DEBUG: handle_socket called. count before: 49
+DEBUG: handle_socket called. count before: 50
+DEBUG: handle_socket called. count before: 51
+DEBUG: handle_socket called. count before: 52
+DEBUG: handle_socket called. count before: 53
+DEBUG: handle_socket called. count before: 54
+DEBUG: handle_socket called. count before: 55
+DEBUG: handle_socket called. count before: 56
+DEBUG: handle_socket called. count before: 57
+DEBUG: handle_socket called. count before: 58
+DEBUG: handle_socket called. count before: 59
+DEBUG: handle_socket called. count before: 60
+DEBUG: handle_socket called. count before: 61
+DEBUG: handle_socket called. count before: 62
+DEBUG: handle_socket called. count before: 63
+DEBUG: handle_socket called. count before: 64
+DEBUG: handle_socket called. count before: 65
+DEBUG: handle_socket called. count before: 66
+DEBUG: handle_socket called. count before: 67
+DEBUG: handle_socket called. count before: 68
+DEBUG: handle_socket called. count before: 69
+DEBUG: handle_socket called. count before: 70
+DEBUG: handle_socket called. count before: 71
+DEBUG: handle_socket called. count before: 72
+DEBUG: handle_socket called. count before: 73
+DEBUG: handle_socket called. count before: 74
+DEBUG: handle_socket called. count before: 75
+DEBUG: handle_socket called. count before: 76
+DEBUG: handle_socket called. count before: 77
+DEBUG: handle_socket called. count before: 78
+DEBUG: handle_socket called. count before: 79
+DEBUG: handle_socket called. count before: 80
+DEBUG: handle_socket called. count before: 81
+DEBUG: handle_socket called. count before: 82
+DEBUG: handle_socket called. count before: 83
+DEBUG: handle_socket called. count before: 84
+DEBUG: handle_socket called. count before: 85
+DEBUG: handle_socket called. count before: 86
+DEBUG: handle_socket called. count before: 87
+DEBUG: handle_socket called. count before: 88
+DEBUG: handle_socket called. count before: 89
+DEBUG: handle_socket called. count before: 90
+DEBUG: handle_socket called. count before: 91
+DEBUG: handle_socket called. count before: 92
+DEBUG: handle_socket called. count before: 93
+DEBUG: handle_socket called. count before: 94
+DEBUG: handle_socket called. count before: 95
+DEBUG: handle_socket called. count before: 96
+DEBUG: handle_socket called. count before: 97
+DEBUG: handle_socket called. count before: 98
+DEBUG: handle_socket called. count before: 99
+DEBUG: handle_socket called. count before: 100
+DEBUG: Rejecting connection. Count: 100
+DEBUG: handle_socket called. count before: 100
+DEBUG: Rejecting connection. Count: 100
+DEBUG: handle_socket called. count before: 100
+DEBUG: Rejecting connection. Count: 100
+DEBUG: handle_socket called. count before: 100
+DEBUG: Rejecting connection. Count: 100
+DEBUG: handle_socket called. count before: 100
+DEBUG: Rejecting connection. Count: 100
+Client 100 rejected: {"type":"error","message":"Too many concurrent connections"}
+Client 101 rejected: {"type":"error","message":"Too many concurrent connections"}
+Client 102 rejected: {"type":"error","message":"Too many concurrent connections"}
+Client 103 rejected: {"type":"error","message":"Too many concurrent connections"}
+Client 104 rejected: {"type":"error","message":"Too many concurrent connections"}
+Accepted: 100, Rejected: 5
+test test_max_concurrent_connections_dos ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.24s
