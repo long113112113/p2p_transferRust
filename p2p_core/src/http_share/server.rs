@@ -15,7 +15,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicUsize};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -147,6 +147,7 @@ pub fn create_router_with_websocket(
         event_tx,
         upload_state,
         download_dir,
+        connection_count: AtomicUsize::new(0),
     });
 
     // Routes
