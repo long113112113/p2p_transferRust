@@ -88,7 +88,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
     };
 
     let csp = format!(
-        "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; {} img-src 'self' data:;",
+        "default-src 'self'; style-src 'self'; script-src 'self'; {} img-src 'self' data:;",
         connect_src
     );
 
@@ -101,7 +101,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
         // Fallback if something goes wrong with formatting (unlikely due to sanitization)
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; img-src 'self' data:;"),
+            HeaderValue::from_static("default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:;"),
         );
     }
 

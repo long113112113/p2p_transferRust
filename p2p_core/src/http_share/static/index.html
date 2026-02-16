@@ -5,12 +5,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>P2P Transfer</title>
-    <!-- Phosphor Icons CDN -->
-    <link rel="stylesheet" type="text/css"
-        href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css" />
-    <link rel="stylesheet" type="text/css"
-        href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css" />
-
     <link rel="stylesheet" type="text/css" href="/style.css" />
 </head>
 
@@ -31,7 +25,7 @@
                 </div>
 
                 <div class="label label-muted">Size</div>
-                <div id="fileSize" class="text-field" style="border: none; background: transparent; padding-left: 0;">0
+                <div id="fileSize" class="text-field no-border">0
                     B</div>
 
                 <!-- Drop Area -->
@@ -45,7 +39,7 @@
                 <!-- Actions -->
                 <div class="label label-muted">Actions</div>
                 <div class="flex-row">
-                    <button id="sendBtn" class="btn" style="flex: 1;" disabled>
+                    <button id="sendBtn" class="btn flex-1" disabled>
                         <i class="ph ph-paper-plane-right"></i> Send
                     </button>
                     <button id="cancelBtn" class="btn" disabled>
@@ -69,17 +63,17 @@
 
                 <!-- Logs -->
                 <div class="label label-muted">Logs</div>
-                <div style="text-align: right;">
-                    <button id="toggleLogBtn" class="btn" style="height: 18px; font-size: 10px;">Show</button>
+                <div class="text-right">
+                    <button id="toggleLogBtn" class="btn btn-xs">Show</button>
                 </div>
-                <div id="logContainer" class="log-container hidden" style="grid-column: 1 / -1;"></div>
+                <div id="logContainer" class="log-container hidden col-span-full"></div>
             </div>
 
         </div>
 
         <!-- Footer / Resize handle area approximation -->
-        <div style="padding: 2px 4px; text-align: right; user-select: none;">
-            <i class="ph-fill ph-check-circle" style="font-size: 8px; color: var(--stroke);"></i>
+        <div class="footer">
+            <i class="ph ph-check-circle footer-icon"></i>
         </div>
     </div>
 
