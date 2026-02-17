@@ -270,3 +270,34 @@ input[type="file"] {
     margin-top: 4px;
     word-break: break-all;
 }
+
+/* Sentinel: Security improvements to remove unsafe-inline styles */
+.text-field.transparent {
+    border: none;
+    background: transparent;
+    padding-left: 0;
+}
+
+.flex-1 {
+    flex: 1;
+}
+
+.btn.xs {
+    height: 18px;
+    font-size: 10px;
+}
+
+.full-width {
+    grid-column: 1 / -1;
+}
+
+.footer-container {
+    padding: 2px 4px;
+    text-align: right;
+    user-select: none;
+}
+
+.footer-icon {
+    font-size: 8px;
+    color: var(--stroke);
+}
