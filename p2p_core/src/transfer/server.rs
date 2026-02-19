@@ -185,7 +185,18 @@ async fn handle_verification_handshake(
 
     send_msg(send, &TransferMsg::VerificationRequired).await?;
 
-    let msg = recv_msg(recv).await?;
+    // Determine timeout duration from env or default to 60s
+    let timeout_secs = std::env::var("P2P_PAIRING_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(60);
+
+    // Add timeout to prevent holding the slot indefinitely
+    let msg = match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), recv_msg(recv)).await {
+        Ok(res) => res?,
+        Err(_) => return Err(anyhow!("Verification timed out")),
+    };
+
     match msg {
         TransferMsg::VerificationCode {
             code: received_code,
