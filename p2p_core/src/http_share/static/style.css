@@ -270,3 +270,66 @@ input[type="file"] {
     margin-top: 4px;
     word-break: break-all;
 }
+
+/* Helper classes to replace inline styles for CSP compliance */
+.text-field.file-size {
+    border: none;
+    background: transparent;
+    padding-left: 0;
+}
+
+.btn.send-btn {
+    flex: 1;
+}
+
+.btn.toggle-log-btn {
+    height: 18px;
+    font-size: 10px;
+}
+
+.log-container {
+    grid-column: 1 / -1;
+}
+
+.footer-container {
+    padding: 2px 4px;
+    text-align: right;
+    user-select: none;
+}
+
+.footer-icon {
+    font-size: 8px;
+    color: var(--stroke);
+}
+
+/* 404 Page Styles */
+body.error-page {
+    background: #1b1b1b;
+    color: #b4b4b4;
+    font-family: monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+}
+
+.box {
+    background: #2b2b2b;
+    border: 1px solid #404040;
+    border-radius: 4px;
+    padding: 24px 32px;
+    text-align: center;
+}
+
+.box h1 {
+    color: #e0e0e0;
+    font-size: 16px;
+    margin: 0 0 8px 0;
+    font-weight: normal;
+}
+
+.box p {
+    margin: 0;
+    font-size: 13px;
+}
