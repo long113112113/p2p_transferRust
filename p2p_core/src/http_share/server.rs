@@ -132,7 +132,10 @@ async fn ws_upgrade_handler(
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
 ) -> Response {
     let ip = addr.ip().to_string();
-    ws.on_upgrade(move |socket| websocket::handle_socket(socket, state, ip))
+    // Enforce strict message size limits to prevent DoS
+    ws.max_message_size(websocket::MAX_WEBSOCKET_MESSAGE_SIZE)
+        .max_frame_size(websocket::MAX_WEBSOCKET_MESSAGE_SIZE)
+        .on_upgrade(move |socket| websocket::handle_socket(socket, state, ip))
 }
 
 /// Build the axum router with a dynamic token path and WebSocket support

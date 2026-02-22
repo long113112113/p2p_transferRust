@@ -9,8 +9,8 @@ mod utils;
 
 pub use handler::handle_socket;
 pub use messages::{
-    CHUNK_SIZE, ClientMessage, MAX_ACTIVE_UPLOADS, MAX_PENDING_UPLOADS, ServerMessage,
-    USER_RESPONSE_TIMEOUT_SECS,
+    CHUNK_SIZE, ClientMessage, MAX_ACTIVE_UPLOADS, MAX_PENDING_UPLOADS, MAX_WEBSOCKET_MESSAGE_SIZE,
+    ServerMessage, USER_RESPONSE_TIMEOUT_SECS,
 };
 pub use state::{PendingUpload, UploadState, WebSocketState, respond_to_upload};
 
@@ -30,5 +30,8 @@ pub async fn ws_handler(
         .map(|a| a.0.ip().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state, client_ip))
+    // Enforce strict message size limits to prevent DoS
+    ws.max_message_size(MAX_WEBSOCKET_MESSAGE_SIZE)
+        .max_frame_size(MAX_WEBSOCKET_MESSAGE_SIZE)
+        .on_upgrade(move |socket| handle_socket(socket, state, client_ip))
 }

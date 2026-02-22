@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 /// Chunk size for binary transfer (256KB - optimized for LAN)
 pub const CHUNK_SIZE: usize = 256 * 1024;
 
+/// Maximum WebSocket message size (512KB)
+/// Allows for 256KB binary chunks + overhead + JSON messages.
+/// Strict limit to prevent DoS attacks.
+pub const MAX_WEBSOCKET_MESSAGE_SIZE: usize = 512 * 1024;
+
 /// Timeout for user response (60 seconds)
 pub const USER_RESPONSE_TIMEOUT_SECS: u64 = 60;
 

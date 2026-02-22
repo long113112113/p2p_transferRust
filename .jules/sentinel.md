@@ -67,3 +67,8 @@
 **Vulnerability:** The `create_secure_file` and `open_secure_file` functions relied on `OpenOptions::mode(0o600)` to set permissions. However, `mode` only applies when a *new* file is created. If the file already existed (even if truncated), the existing permissions were preserved, allowing pre-created world-readable files to remain insecure.
 **Learning:** `OpenOptions` flags like `create` and `truncate` handle file content but do not enforce metadata (permissions) on existing files. Security-critical file operations must explicitly set permissions on the open file handle to ensure the intended state.
 **Prevention:** Always use `file.set_permissions()` on the open file handle when creating or overwriting sensitive files, rather than relying solely on creation-time flags.
+
+## 2025-05-27 - Unbounded WebSocket Message Size DoS
+**Vulnerability:** The Axum WebSocket handler used default settings which allow large messages (up to 64MB). An attacker could send multiple large messages to exhaust server memory (DoS).
+**Learning:** Framework defaults (like `axum::extract::ws::WebSocketUpgrade`) are often generous to support varied use cases. For specific applications like file transfer where chunk sizes are known, these defaults are excessive and dangerous.
+**Prevention:** Explicitly set `.max_message_size()` and `.max_frame_size()` on WebSocket upgrade handlers to match the application's expected data limits (e.g., slightly above chunk size).
