@@ -270,3 +270,38 @@ input[type="file"] {
     margin-top: 4px;
     word-break: break-all;
 }
+
+/* New additions to remove inline styles */
+#fileSize {
+    border: none;
+    background: transparent;
+    padding-left: 0;
+}
+
+#sendBtn {
+    flex: 1;
+}
+
+#toggleLogBtn {
+    height: 18px;
+    font-size: 10px;
+}
+
+.log-container {
+    grid-column: 1 / -1;
+}
+
+.footer-icon-container {
+    padding: 2px 4px;
+    text-align: right;
+    user-select: none;
+}
+
+.footer-icon {
+    font-size: 8px;
+    color: var(--stroke);
+}
+
+.text-right {
+    text-align: right;
+}
