@@ -88,7 +88,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
     };
 
     let csp = format!(
-        "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; {} img-src 'self' data:;",
+        "default-src 'self'; style-src 'self' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; {} img-src 'self' data:;",
         connect_src
     );
 
@@ -101,7 +101,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
         // Fallback if something goes wrong with formatting (unlikely due to sanitization)
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; img-src 'self' data:;"),
+            HeaderValue::from_static("default-src 'self'; style-src 'self' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; img-src 'self' data:;"),
         );
     }
 
@@ -690,6 +690,40 @@ mod security_tests {
 
         // Should NOT contain the old permissive wildcards
         assert!(!csp.contains("ws: wss:"));
+    }
+
+    #[tokio::test]
+    async fn test_csp_style_src_strictness() {
+        let token = "test_token_csp_style";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from(".");
+        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/{}", token))
+                    .header("Host", "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let csp = response
+            .headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        // Should NOT contain 'unsafe-inline' for styles
+        assert!(
+            !csp.contains("'unsafe-inline'"),
+            "CSP should not contain 'unsafe-inline' but got: {}",
+            csp
+        );
     }
 
     #[test]

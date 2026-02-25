@@ -270,3 +270,70 @@ input[type="file"] {
     margin-top: 4px;
     word-break: break-all;
 }
+
+/* Inline replacements for index.html */
+#fileSize {
+    border: none;
+    background: transparent;
+    padding-left: 0;
+}
+
+#sendBtn {
+    flex: 1;
+}
+
+#toggleLogBtn {
+    height: 18px;
+    font-size: 10px;
+}
+
+#logContainer {
+    grid-column: 1 / -1;
+}
+
+.footer-icon-container {
+    padding: 2px 4px;
+    text-align: right;
+    user-select: none;
+}
+
+.footer-icon {
+    font-size: 8px;
+    color: var(--stroke);
+}
+
+/* Error Page (404.html) */
+body.error-page {
+    background: #1b1b1b;
+    color: #b4b4b4;
+    font-family: monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+}
+
+.error-box {
+    background: #2b2b2b;
+    border: 1px solid #404040;
+    border-radius: 4px;
+    padding: 24px 32px;
+    text-align: center;
+}
+
+.error-box h1 {
+    color: #e0e0e0;
+    font-size: 16px;
+    margin: 0 0 8px 0;
+    font-weight: normal;
+}
+
+.error-box p {
+    margin: 0;
+    font-size: 13px;
+}
+
+.text-right {
+    text-align: right;
+}
