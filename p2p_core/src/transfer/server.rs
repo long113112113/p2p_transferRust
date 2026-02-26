@@ -185,8 +185,7 @@ async fn handle_verification_handshake(
 
     send_msg(send, &TransferMsg::VerificationRequired).await?;
 
-    // Enforce timeout on verification code reception to prevent DoS
-    // Default to 60 seconds if not specified
+    // Default 60 seconds timeout, override with P2P_PAIRING_TIMEOUT
     let timeout_secs = std::env::var("P2P_PAIRING_TIMEOUT")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -199,11 +198,7 @@ async fn handle_verification_handshake(
     .await
     {
         Ok(res) => res?,
-        Err(_) => {
-            tracing::warn!("Pairing verification timed out for {}", remote_addr);
-            // This error will propagate up, causing the PairingGuard to be dropped
-            return Err(anyhow!("Verification timed out"));
-        }
+        Err(_) => return Err(anyhow!("Verification timed out")),
     };
 
     match msg {

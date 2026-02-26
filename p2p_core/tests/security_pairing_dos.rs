@@ -1,151 +1,105 @@
-use p2p_core::transfer::protocol::{TransferMsg, recv_msg, send_msg};
-use p2p_core::transfer::{make_client_endpoint, make_server_endpoint, run_server};
+use p2p_core::transfer::{make_server_endpoint, make_client_endpoint, protocol::{TransferMsg, send_msg, recv_msg}};
 use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep};
+use std::time::Duration;
 
 #[tokio::test]
-async fn test_pairing_dos_vulnerability() {
-    // Install crypto provider if needed (might fail if already installed, which is fine)
+async fn test_pairing_dos_timeout() {
+    // Install crypto provider
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // Set a short timeout for the fix (2 seconds)
-    // For reproduction (before fix), this won't matter as there is no timeout
-    unsafe {
-        std::env::set_var("P2P_PAIRING_TIMEOUT", "2");
-    }
+    // Set timeout to 1 second for test
+    // SAFETY: This is a test, and we are setting the environment variable before spawning the server.
+    unsafe { std::env::set_var("P2P_PAIRING_TIMEOUT", "1"); }
 
     // 1. Setup Server
-    let server_addr = "127.0.0.1:0".parse().unwrap();
-    let server_endpoint = make_server_endpoint(server_addr).unwrap();
-    let server_addr = server_endpoint.local_addr().unwrap();
-
-    let (event_tx, _event_rx) = mpsc::channel(100);
-    let download_dir = std::env::temp_dir().join("p2p_dos_test");
+    let (tx, mut rx) = mpsc::channel(100);
+    // Use a unique directory for this test
+    let download_dir = std::env::temp_dir().join(format!("p2p_test_dos_{}", uuid::Uuid::new_v4()));
     let _ = tokio::fs::create_dir_all(&download_dir).await;
 
-    // Spawn server
-    let server_handle = tokio::spawn(async move {
-        run_server(server_endpoint, event_tx, download_dir).await;
+    let server_endpoint = make_server_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
+    let server_addr = server_endpoint.local_addr().unwrap();
+
+    let server_endpoint_clone = server_endpoint.clone();
+    tokio::spawn(async move {
+        p2p_core::transfer::run_server(server_endpoint_clone, tx, download_dir).await;
     });
 
-    // 2. Setup Client Endpoint (shared)
-    let client_endpoint = make_client_endpoint().unwrap();
+    // Spawn a task to drain the event channel so the server doesn't block on sending events
+    tokio::spawn(async move {
+        while let Some(_) = rx.recv().await {}
+    });
 
-    // 3. Connect 3 "Attackers"
-    let mut attacker_conns = Vec::new();
+    // 2. Connect 3 stalling clients (MAX_PAIRING_ATTEMPTS = 3)
+    let client_endpoint = make_client_endpoint().unwrap();
+    let mut stalled_conns = Vec::new();
 
     for i in 0..3 {
-        let endpoint = client_endpoint.clone();
-        let conn = endpoint
-            .connect(server_addr, "localhost")
-            .unwrap()
-            .await
-            .expect("Attacker failed to connect");
-
-        let (mut send, mut recv) = conn.open_bi().await.expect("Attacker failed to open stream");
+        let connection = client_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+        let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
         // Send PairingRequest
         let msg = TransferMsg::PairingRequest {
             endpoint_id: format!("attacker_{}", i),
-            peer_name: format!("Attacker {}", i),
+            peer_name: "Attacker".to_string(),
         };
-        send_msg(&mut send, &msg).await.expect("Attacker failed to send request");
+        send_msg(&mut send, &msg).await.unwrap();
 
-        // Wait for VerificationRequired
-        let response = recv_msg(&mut recv).await.expect("Attacker failed to receive response");
-        if let TransferMsg::VerificationRequired = response {
-            // Good, we are holding a slot
+        // Read VerificationRequired
+        let resp = recv_msg(&mut recv).await.unwrap();
+        if let TransferMsg::VerificationRequired = resp {
+            // Good, now STALL. Do not send code.
+            stalled_conns.push((send, recv));
         } else {
-            panic!("Attacker {} got unexpected response: {:?}", i, response);
+            panic!("Expected VerificationRequired, got {:?}", resp);
         }
-
-        // STALL: Do not send code. Keep connection open.
-        attacker_conns.push((conn, send, recv));
     }
 
-    // 4. Connect "Victim" - Should be rejected immediately (DoS)
+    // 3. Try 4th client - should be rejected immediately (slots full)
     {
-        let endpoint = client_endpoint.clone();
-        let conn = endpoint
-            .connect(server_addr, "localhost")
-            .unwrap()
-            .await
-            .expect("Victim failed to connect");
+        let connection = client_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+        let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
-        let (mut send, mut recv) = conn.open_bi().await.expect("Victim failed to open stream");
-
-        // Send PairingRequest
         let msg = TransferMsg::PairingRequest {
-            endpoint_id: "victim".to_string(),
-            peer_name: "Victim".to_string(),
+            endpoint_id: "victim_1".to_string(),
+            peer_name: "Victim 1".to_string(),
         };
-        send_msg(&mut send, &msg).await.expect("Victim failed to send request");
+        send_msg(&mut send, &msg).await.unwrap();
 
-        // Expect Failure
-        let response = recv_msg(&mut recv).await.expect("Victim failed to receive response");
-        match response {
+        let resp = recv_msg(&mut recv).await.unwrap();
+        match resp {
             TransferMsg::VerificationFailed { message } => {
-                assert!(message.contains("Too many pending"), "Expected 'Too many pending', got: {}", message);
-                println!("Confirmed DoS: Victim rejected as expected.");
-            }
-            _ => panic!("Victim succeeded but should have failed! DoS not active? Got: {:?}", response),
+                assert_eq!(message, "Too many pending verification attempts");
+            },
+            _ => panic!("Expected VerificationFailed immediately, got {:?}", resp),
         }
     }
 
-    // 5. Wait for Timeout (3 seconds)
-    // If the fix is working, the server should drop the attackers after 2 seconds (P2P_PAIRING_TIMEOUT)
-    println!("Waiting for timeout (3s)...");
-    sleep(Duration::from_secs(3)).await;
+    // 4. Wait for timeout (1.5s > 1s)
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    // 6. Connect "New Victim" - Should SUCCEED if fix works
+    // 5. Try 5th client - should SUCCEED if timeout works (slots freed)
+    // If vulnerability exists (no timeout), this will fail with "Too many pending verification attempts"
     {
-        let endpoint = client_endpoint.clone();
-        let conn = endpoint
-            .connect(server_addr, "localhost")
-            .unwrap()
-            .await
-            .expect("New Victim failed to connect");
+        let connection = client_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+        let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
-        let (mut send, mut recv) = conn.open_bi().await.expect("New Victim failed to open stream");
-
-        // Send PairingRequest
         let msg = TransferMsg::PairingRequest {
-            endpoint_id: "victim_new".to_string(),
-            peer_name: "New Victim".to_string(),
+            endpoint_id: "victim_2".to_string(),
+            peer_name: "Victim 2".to_string(),
         };
-        send_msg(&mut send, &msg).await.expect("New Victim failed to send request");
+        send_msg(&mut send, &msg).await.unwrap();
 
-        // Expect VerificationRequired (Success)
-        // Note: recv_msg might fail if server closed connection (if fix is NOT implemented yet, or if attackers still hold slots)
-        // If fix is NOT implemented, attackers still hold slots, so this should FAIL.
-        // If fix IS implemented, attackers were dropped, so this should SUCCEED.
-
-        // Since we are running this test BEFORE the fix to confirm vulnerability,
-        // we expect this to FAIL (or timeout waiting if we didn't implement timeout yet).
-
-        // Wait, "Wait for timeout" step relies on the fix being present.
-        // Without the fix, the attackers will hold the slots forever.
-        // So this second attempt should ALSO fail if the bug is present.
-
-        let result = recv_msg(&mut recv).await;
-
-        // Check if we are running with or without fix?
-        // Actually, this test is designed to PASS only after the fix.
-        // Before the fix, it should FAIL at this assertion.
-        match result {
-             Ok(TransferMsg::VerificationRequired) => {
-                 println!("Success: Slots were freed!");
-             },
-             Ok(TransferMsg::VerificationFailed { message }) => {
-                 panic!("Failed: Slots still blocked after timeout! Message: {}", message);
-             }
-             Err(e) => {
-                 panic!("Failed to receive response: {}", e);
-             }
-             _ => panic!("Unexpected response"),
+        let resp = recv_msg(&mut recv).await.unwrap();
+        match resp {
+            TransferMsg::VerificationRequired => {
+                // Success! Slots were freed.
+            },
+            TransferMsg::VerificationFailed { message } => {
+                // Failure! Slots still occupied.
+                panic!("Vulnerability confirmed: Client rejected after timeout wait: {}", message);
+            },
+            _ => panic!("Unexpected response: {:?}", resp),
         }
     }
-
-    // Cleanup
-    server_handle.abort();
 }
