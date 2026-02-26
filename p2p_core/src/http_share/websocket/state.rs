@@ -62,6 +62,7 @@ pub struct WebSocketState {
     pub event_tx: mpsc::Sender<AppEvent>,
     pub upload_state: Arc<UploadState>,
     pub download_dir: PathBuf,
+    pub connection_count: AtomicUsize,
 }
 
 /// Guard for active upload count

@@ -1,6 +1,6 @@
 //! WebSocket connection handler
 
-use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS};
+use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS, MAX_CONNECTIONS};
 use super::state::{ActiveUploadGuard, WebSocketState};
 use super::utils::{cleanup_pending, create_secure_file, validate_file_info, wait_for_file_info};
 use crate::transfer::utils::sanitize_file_name;
@@ -8,8 +8,20 @@ use crate::AppEvent;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio::{io::AsyncWriteExt, sync::oneshot};
 use uuid::Uuid;
+
+/// RAII guard to decrement connection count on drop
+struct ConnectionGuard {
+    state: Arc<WebSocketState>,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.state.connection_count.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// Ping interval for keeping WebSocket connection alive (5 seconds)
 /// Mobile browsers may have stricter timeouts, so we ping more frequently
@@ -21,6 +33,31 @@ const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
 /// Handle WebSocket connection
 pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client_ip: String) {
     let (mut sender, mut receiver) = socket.split();
+
+    // Check connection limit
+    let current_connections = state.connection_count.fetch_add(1, Ordering::SeqCst);
+    if current_connections >= MAX_CONNECTIONS {
+        tracing::warn!(
+            "Rejecting connection from {}: Too many concurrent connections ({})",
+            client_ip,
+            current_connections + 1
+        );
+        state.connection_count.fetch_sub(1, Ordering::SeqCst);
+        let _ = sender
+            .send(Message::Text(
+                serde_json::to_string(&ServerMessage::Error {
+                    message: "Too many concurrent connections".to_string(),
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await;
+        return;
+    }
+
+    let _connection_guard = ConnectionGuard {
+        state: state.clone(),
+    };
 
     tracing::info!("WebSocket connection established from: {}", client_ip);
 
