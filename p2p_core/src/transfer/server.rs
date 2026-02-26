@@ -185,7 +185,26 @@ async fn handle_verification_handshake(
 
     send_msg(send, &TransferMsg::VerificationRequired).await?;
 
-    let msg = recv_msg(recv).await?;
+    let msg = match tokio::time::timeout(
+        super::constants::get_pairing_timeout(),
+        recv_msg(recv),
+    )
+    .await
+    {
+        Ok(res) => res?,
+        Err(_) => {
+            // Timeout
+            let _ = send_msg(
+                send,
+                &TransferMsg::VerificationFailed {
+                    message: "Verification timed out".to_string(),
+                },
+            )
+            .await;
+            return Err(anyhow!("Verification timed out"));
+        }
+    };
+
     match msg {
         TransferMsg::VerificationCode {
             code: received_code,
