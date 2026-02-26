@@ -15,7 +15,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicUsize};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -92,7 +92,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
     };
 
     let csp = format!(
-        "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; {} img-src 'self' data:;",
+        "default-src 'self'; style-src 'self'; script-src 'self'; {} img-src 'self' data:;",
         connect_src
     );
 
@@ -105,7 +105,7 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
         // Fallback if something goes wrong with formatting (unlikely due to sanitization)
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; img-src 'self' data:;"),
+            HeaderValue::from_static("default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:;"),
         );
     }
 
@@ -153,6 +153,7 @@ pub fn create_router_with_websocket(
         event_tx,
         upload_state,
         download_dir,
+        connection_count: AtomicUsize::new(0),
     });
 
     // Routes

@@ -16,6 +16,12 @@ pub const MAX_PENDING_UPLOADS: usize = 10;
 /// Maximum number of concurrent active uploads
 pub const MAX_ACTIVE_UPLOADS: usize = 5;
 
+/// Maximum number of concurrent WebSocket connections
+#[cfg(not(test))]
+pub const MAX_CONNECTIONS: usize = 100;
+#[cfg(test)]
+pub const MAX_CONNECTIONS: usize = 10;
+
 /// Messages from client to server
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -51,5 +57,6 @@ mod tests {
         assert!(MAX_FILE_SIZE > 0);
         assert_eq!(MAX_PENDING_UPLOADS, 10);
         assert_eq!(MAX_ACTIVE_UPLOADS, 5);
+        assert_eq!(MAX_CONNECTIONS, 10); // In test mode
     }
 }
