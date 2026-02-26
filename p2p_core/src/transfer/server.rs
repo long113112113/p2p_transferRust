@@ -34,7 +34,27 @@ pub async fn run_server(
 
                         tokio::spawn(async move {
                             // Read first message to determine type
-                            match recv_msg(&mut recv_stream).await {
+                            // Use a 5s timeout for the initial message to prevent Slowloris attacks
+                            let msg_result = tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                recv_msg(&mut recv_stream),
+                            )
+                            .await;
+
+                            let recv_result = match msg_result {
+                                Ok(res) => res,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        "Connection timed out waiting for first message from {}",
+                                        remote_addr
+                                    );
+                                    // FORCE CLOSE streams to be sure
+                                    let _ = send_stream.finish();
+                                    return;
+                                }
+                            };
+
+                            match recv_result {
                                 Ok(msg) => {
                                     match msg {
                                         TransferMsg::PairingRequest {
