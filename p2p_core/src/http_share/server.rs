@@ -27,8 +27,7 @@ use super::websocket::{self, UploadState, WebSocketState};
 pub const HTTP_PORT: u16 = 8080;
 
 /// Maximum WebSocket message size (512KB)
-/// This accommodates the 256KB file chunks used by the client plus overhead,
-/// while preventing memory exhaustion attacks (DoS).
+/// This allows for 256KB chunks + overhead to prevent DoS via large allocations
 const MAX_WEBSOCKET_MESSAGE_SIZE: usize = 512 * 1024;
 
 /// Static HTML content for the web interface

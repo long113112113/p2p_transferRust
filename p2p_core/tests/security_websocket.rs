@@ -216,4 +216,83 @@ mod tests {
         // Cleanup
         let _ = tokio::fs::remove_dir_all(&download_dir).await;
     }
+
+    #[tokio::test]
+    async fn test_websocket_message_size_limit() {
+        // Setup
+        let token = "test_token_msg_size";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        // Use a unique temp dir
+        let temp_dir = std::env::temp_dir().join(format!("p2p_test_msg_size_{}", uuid::Uuid::new_v4()));
+        let _ = tokio::fs::create_dir_all(&temp_dir).await;
+
+        let router = create_router_with_websocket(token, tx, upload_state, temp_dir.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Spawn server
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+
+        // Give server a moment to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let ws_url = format!("ws://127.0.0.1:{}/{}/ws", port, token);
+
+        // Connect client
+        let (ws_stream, _) = connect_async(&ws_url).await.expect("Failed to connect");
+        let (mut write, mut read) = ws_stream.split();
+
+        // Send FileInfo
+        let msg = ClientMessage::FileInfo {
+            file_name: "large_message.bin".to_string(),
+            file_size: 10 * 1024 * 1024, // 10MB
+        };
+        write
+            .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
+            .await
+            .unwrap();
+
+        // Send a LARGE message (1MB)
+        // With limit 512KB, this should cause a protocol error (Close).
+        let large_data = vec![0u8; 1024 * 1024]; // 1MB
+        if let Err(e) = write.send(Message::Binary(large_data.into())).await {
+             println!("Send failed: {}", e);
+        }
+
+        // Check if connection is closed by server
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(2), read.next()).await;
+
+        match result {
+            Ok(Some(Ok(msg))) => {
+                if let Message::Close(close_frame) = msg {
+                     if let Some(frame) = close_frame {
+                        // 1009 is Message Too Big
+                        assert_eq!(frame.code, tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Size);
+                     }
+                } else {
+                    panic!("Server accepted 1MB message (should have rejected with size limit)");
+                }
+            }
+            Ok(Some(Err(_e))) => {
+                // Protocol error is acceptable
+            }
+            Ok(None) => {
+                // Stream ended, acceptable
+            }
+            Err(_) => {
+                panic!("Timeout: Server did not close connection (accepted large message)");
+            }
+        }
+
+        // Cleanup
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
 }
