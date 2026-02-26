@@ -26,6 +26,11 @@ use super::websocket::{self, UploadState, WebSocketState};
 /// Default HTTP port for file sharing
 pub const HTTP_PORT: u16 = 8080;
 
+/// Maximum WebSocket message size (512KB)
+/// This accommodates the 256KB file chunks used by the client plus overhead,
+/// while preventing memory exhaustion attacks (DoS).
+const MAX_WEBSOCKET_MESSAGE_SIZE: usize = 512 * 1024;
+
 /// Static HTML content for the web interface
 const INDEX_HTML: &str = include_str!("static/index.html");
 
@@ -132,7 +137,9 @@ async fn ws_upgrade_handler(
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
 ) -> Response {
     let ip = addr.ip().to_string();
-    ws.on_upgrade(move |socket| websocket::handle_socket(socket, state, ip))
+    ws.max_message_size(MAX_WEBSOCKET_MESSAGE_SIZE)
+        .max_frame_size(MAX_WEBSOCKET_MESSAGE_SIZE)
+        .on_upgrade(move |socket| websocket::handle_socket(socket, state, ip))
 }
 
 /// Build the axum router with a dynamic token path and WebSocket support
