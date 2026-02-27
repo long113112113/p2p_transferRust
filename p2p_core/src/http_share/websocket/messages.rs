@@ -20,7 +20,7 @@ pub const MAX_ACTIVE_UPLOADS: usize = 5;
 #[cfg(not(test))]
 pub const MAX_CONNECTIONS: usize = 100;
 #[cfg(test)]
-pub const MAX_CONNECTIONS: usize = 10;
+pub const MAX_CONNECTIONS: usize = 20;
 
 /// Messages from client to server
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,6 +57,6 @@ mod tests {
         assert!(MAX_FILE_SIZE > 0);
         assert_eq!(MAX_PENDING_UPLOADS, 10);
         assert_eq!(MAX_ACTIVE_UPLOADS, 5);
-        assert_eq!(MAX_CONNECTIONS, 10); // In test mode
+        assert_eq!(MAX_CONNECTIONS, 20); // In test mode
     }
 }
