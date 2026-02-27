@@ -73,7 +73,7 @@ async fn test_max_concurrent_connections_dos() {
             Ok((write, read, msg_result)) => {
                 match msg_result {
                     Ok(Some(Ok(Message::Text(text)))) => {
-                        if text.contains("Too many concurrent connections") {
+                        if text.contains("Too many concurrent connections") || text.contains("Too many connections from this IP") {
                             println!("Client {} rejected: {}", i, text);
                             rejected_count += 1;
                         } else {

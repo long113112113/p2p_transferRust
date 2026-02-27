@@ -63,6 +63,7 @@ pub struct WebSocketState {
     pub upload_state: Arc<UploadState>,
     pub download_dir: PathBuf,
     pub connection_count: AtomicUsize,
+    pub ip_counts: std::sync::Mutex<HashMap<String, usize>>,
 }
 
 /// Guard for active upload count
