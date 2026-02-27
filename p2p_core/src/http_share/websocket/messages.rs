@@ -20,7 +20,13 @@ pub const MAX_ACTIVE_UPLOADS: usize = 5;
 #[cfg(not(test))]
 pub const MAX_CONNECTIONS: usize = 100;
 #[cfg(test)]
-pub const MAX_CONNECTIONS: usize = 10;
+pub const MAX_CONNECTIONS: usize = 30;
+
+/// Maximum number of concurrent WebSocket connections per IP
+#[cfg(not(test))]
+pub const MAX_CONNECTIONS_PER_IP: usize = 20;
+#[cfg(test)]
+pub const MAX_CONNECTIONS_PER_IP: usize = 15;
 
 /// Messages from client to server
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,6 +63,7 @@ mod tests {
         assert!(MAX_FILE_SIZE > 0);
         assert_eq!(MAX_PENDING_UPLOADS, 10);
         assert_eq!(MAX_ACTIVE_UPLOADS, 5);
-        assert_eq!(MAX_CONNECTIONS, 10); // In test mode
+        assert_eq!(MAX_CONNECTIONS, 30); // In test mode
+        assert_eq!(MAX_CONNECTIONS_PER_IP, 15); // In test mode
     }
 }

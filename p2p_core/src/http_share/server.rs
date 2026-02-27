@@ -154,6 +154,7 @@ pub fn create_router_with_websocket(
         upload_state,
         download_dir,
         connection_count: AtomicUsize::new(0),
+        ip_counts: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
 
     // Routes

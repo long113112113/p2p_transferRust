@@ -1,6 +1,8 @@
 //! WebSocket connection handler
 
-use super::messages::{ServerMessage, USER_RESPONSE_TIMEOUT_SECS, MAX_CONNECTIONS};
+use super::messages::{
+    MAX_CONNECTIONS, MAX_CONNECTIONS_PER_IP, ServerMessage, USER_RESPONSE_TIMEOUT_SECS,
+};
 use super::state::{ActiveUploadGuard, WebSocketState};
 use super::utils::{cleanup_pending, create_secure_file, validate_file_info, wait_for_file_info};
 use crate::transfer::utils::sanitize_file_name;
@@ -15,11 +17,22 @@ use uuid::Uuid;
 /// RAII guard to decrement connection count on drop
 struct ConnectionGuard {
     state: Arc<WebSocketState>,
+    client_ip: String,
 }
 
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         self.state.connection_count.fetch_sub(1, Ordering::SeqCst);
+        if let Ok(mut counts) = self.state.ip_counts.lock() {
+            if let Some(count) = counts.get_mut(&self.client_ip) {
+                if *count > 0 {
+                    *count -= 1;
+                }
+                if *count == 0 {
+                    counts.remove(&self.client_ip);
+                }
+            }
+        }
     }
 }
 
@@ -34,6 +47,42 @@ const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
 pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client_ip: String) {
     let (mut sender, mut receiver) = socket.split();
 
+    // Check IP limit
+    {
+        // We use a block here to drop the lock immediately after checking/incrementing
+        let count = {
+            let mut counts = state.ip_counts.lock().unwrap();
+            let count = counts.entry(client_ip.clone()).or_insert(0);
+            if *count >= MAX_CONNECTIONS_PER_IP {
+                *count // Return the value to check outside
+            } else {
+                *count += 1;
+                0 // Indicates success
+            }
+        };
+
+        if count >= MAX_CONNECTIONS_PER_IP {
+            tracing::warn!(
+                "Rejecting connection from {}: Too many connections from this IP ({})",
+                client_ip,
+                count + 1
+            );
+            // We can't easily send a message and close gracefully here if we want to be fast,
+            // but let's try to be nice.
+            // Note: If we just return, the socket is dropped and closed.
+            let _ = sender
+                .send(Message::Text(
+                    serde_json::to_string(&ServerMessage::Error {
+                        message: "Too many connections from this IP".to_string(),
+                    })
+                    .unwrap()
+                    .into(),
+                ))
+                .await;
+            return;
+        }
+    }
+
     // Check connection limit
     let current_connections = state.connection_count.fetch_add(1, Ordering::SeqCst);
     if current_connections >= MAX_CONNECTIONS {
@@ -42,6 +91,19 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
             client_ip,
             current_connections + 1
         );
+        // Decrement IP count since we are rejecting
+        if let Ok(mut counts) = state.ip_counts.lock() {
+            if let Some(count) = counts.get_mut(&client_ip) {
+                if *count > 0 {
+                    *count -= 1;
+                }
+                // Optional: cleanup if 0
+                if *count == 0 {
+                    counts.remove(&client_ip);
+                }
+            }
+        }
+
         state.connection_count.fetch_sub(1, Ordering::SeqCst);
         let _ = sender
             .send(Message::Text(
@@ -57,6 +119,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
 
     let _connection_guard = ConnectionGuard {
         state: state.clone(),
+        client_ip: client_ip.clone(),
     };
 
     tracing::info!("WebSocket connection established from: {}", client_ip);
