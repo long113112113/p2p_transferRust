@@ -1,12 +1,14 @@
+use p2p_core::transfer::protocol::{TransferMsg, recv_msg, send_msg};
 use p2p_core::transfer::{make_client_endpoint, make_server_endpoint, run_server};
-use p2p_core::transfer::protocol::{recv_msg, send_msg, TransferMsg};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn test_pairing_dos_reproduction() {
     // Set timeout to 2 seconds for this test
-    unsafe { std::env::set_var("P2P_PAIRING_TIMEOUT", "2"); }
+    unsafe {
+        std::env::set_var("P2P_PAIRING_TIMEOUT", "2");
+    }
 
     // Install crypto provider if needed
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -30,7 +32,11 @@ async fn test_pairing_dos_reproduction() {
     for i in 0..3 {
         let endpoint = client_endpoint.clone();
         let handle = tokio::spawn(async move {
-            let connection = endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+            let connection = endpoint
+                .connect(server_addr, "localhost")
+                .unwrap()
+                .await
+                .unwrap();
             let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
             // Send PairingRequest
@@ -64,7 +70,11 @@ async fn test_pairing_dos_reproduction() {
 
     // 3. Try to connect a 4th "Legitimate" Client
     let legitimate_endpoint = client_endpoint.clone();
-    let connection = legitimate_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+    let connection = legitimate_endpoint
+        .connect(server_addr, "localhost")
+        .unwrap()
+        .await
+        .unwrap();
     let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
     // Send PairingRequest
@@ -84,7 +94,12 @@ async fn test_pairing_dos_reproduction() {
 
     match msg {
         TransferMsg::VerificationFailed { message } => {
-            assert!(message.contains("Too many pending attempts") || message.contains("Too many pending verification attempts"), "Expected 'Too many pending attempts', got: {}", message);
+            assert!(
+                message.contains("Too many pending attempts")
+                    || message.contains("Too many pending verification attempts"),
+                "Expected 'Too many pending attempts', got: {}",
+                message
+            );
         }
         _ => panic!("Expected VerificationFailed due to DoS, got {:?}", msg),
     }
@@ -98,7 +113,11 @@ async fn test_pairing_dos_reproduction() {
 
     println!("Connecting 5th client...");
     let success_endpoint = client_endpoint.clone();
-    let connection = success_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+    let connection = success_endpoint
+        .connect(server_addr, "localhost")
+        .unwrap()
+        .await
+        .unwrap();
     let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
     send_msg(

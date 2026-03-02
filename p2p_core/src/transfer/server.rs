@@ -3,8 +3,8 @@ use anyhow::{Result, anyhow};
 use quinn::Endpoint;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 
 use super::protocol::{TransferMsg, recv_msg, send_msg};
@@ -91,8 +91,9 @@ pub async fn run_server(
                                                 let _ = send_msg(
                                                     &mut send_stream,
                                                     &TransferMsg::VerificationFailed {
-                                                        message: "Unauthenticated transfer rejected"
-                                                            .to_string(),
+                                                        message:
+                                                            "Unauthenticated transfer rejected"
+                                                                .to_string(),
                                                     },
                                                 )
                                                 .await;
@@ -211,15 +212,13 @@ async fn handle_verification_handshake(
         .and_then(|s| s.parse().ok())
         .unwrap_or(60);
 
-    let msg = match tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        recv_msg(recv),
-    )
-    .await
-    {
-        Ok(res) => res?,
-        Err(_) => return Err(anyhow!("Verification timed out")),
-    };
+    let msg =
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), recv_msg(recv))
+            .await
+        {
+            Ok(res) => res?,
+            Err(_) => return Err(anyhow!("Verification timed out")),
+        };
 
     match msg {
         TransferMsg::VerificationCode {

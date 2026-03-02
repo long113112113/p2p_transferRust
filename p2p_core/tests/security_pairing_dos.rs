@@ -1,6 +1,9 @@
-use p2p_core::transfer::{make_server_endpoint, make_client_endpoint, protocol::{TransferMsg, send_msg, recv_msg}};
-use tokio::sync::mpsc;
+use p2p_core::transfer::{
+    make_client_endpoint, make_server_endpoint,
+    protocol::{TransferMsg, recv_msg, send_msg},
+};
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn test_pairing_dos_timeout() {
@@ -9,7 +12,9 @@ async fn test_pairing_dos_timeout() {
 
     // Set timeout to 1 second for test
     // SAFETY: This is a test, and we are setting the environment variable before spawning the server.
-    unsafe { std::env::set_var("P2P_PAIRING_TIMEOUT", "1"); }
+    unsafe {
+        std::env::set_var("P2P_PAIRING_TIMEOUT", "1");
+    }
 
     // 1. Setup Server
     let (tx, mut rx) = mpsc::channel(100);
@@ -26,16 +31,18 @@ async fn test_pairing_dos_timeout() {
     });
 
     // Spawn a task to drain the event channel so the server doesn't block on sending events
-    tokio::spawn(async move {
-        while let Some(_) = rx.recv().await {}
-    });
+    tokio::spawn(async move { while let Some(_) = rx.recv().await {} });
 
     // 2. Connect 3 stalling clients (MAX_PAIRING_ATTEMPTS = 3)
     let client_endpoint = make_client_endpoint().unwrap();
     let mut stalled_conns = Vec::new();
 
     for i in 0..3 {
-        let connection = client_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+        let connection = client_endpoint
+            .connect(server_addr, "localhost")
+            .unwrap()
+            .await
+            .unwrap();
         let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
         // Send PairingRequest
@@ -57,7 +64,11 @@ async fn test_pairing_dos_timeout() {
 
     // 3. Try 4th client - should be rejected immediately (slots full)
     {
-        let connection = client_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+        let connection = client_endpoint
+            .connect(server_addr, "localhost")
+            .unwrap()
+            .await
+            .unwrap();
         let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
         let msg = TransferMsg::PairingRequest {
@@ -70,7 +81,7 @@ async fn test_pairing_dos_timeout() {
         match resp {
             TransferMsg::VerificationFailed { message } => {
                 assert_eq!(message, "Too many pending verification attempts");
-            },
+            }
             _ => panic!("Expected VerificationFailed immediately, got {:?}", resp),
         }
     }
@@ -81,7 +92,11 @@ async fn test_pairing_dos_timeout() {
     // 5. Try 5th client - should SUCCEED if timeout works (slots freed)
     // If vulnerability exists (no timeout), this will fail with "Too many pending verification attempts"
     {
-        let connection = client_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+        let connection = client_endpoint
+            .connect(server_addr, "localhost")
+            .unwrap()
+            .await
+            .unwrap();
         let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
         let msg = TransferMsg::PairingRequest {
@@ -94,11 +109,14 @@ async fn test_pairing_dos_timeout() {
         match resp {
             TransferMsg::VerificationRequired => {
                 // Success! Slots were freed.
-            },
+            }
             TransferMsg::VerificationFailed { message } => {
                 // Failure! Slots still occupied.
-                panic!("Vulnerability confirmed: Client rejected after timeout wait: {}", message);
-            },
+                panic!(
+                    "Vulnerability confirmed: Client rejected after timeout wait: {}",
+                    message
+                );
+            }
             _ => panic!("Unexpected response: {:?}", resp),
         }
     }

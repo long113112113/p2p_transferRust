@@ -1,5 +1,5 @@
-use p2p_core::transfer::{make_server_endpoint, make_client_endpoint, protocol::recv_msg};
 use p2p_core::transfer::constants::MAX_MSG_SIZE;
+use p2p_core::transfer::{make_client_endpoint, make_server_endpoint, protocol::recv_msg};
 
 #[tokio::test]
 async fn test_large_message_rejection() {
@@ -24,12 +24,20 @@ async fn test_large_message_rejection() {
 
             assert!(result.is_err(), "Should fail to receive large message");
             let err = result.unwrap_err();
-            assert!(err.to_string().contains("Message too large"), "Error should be about message size: {}", err);
+            assert!(
+                err.to_string().contains("Message too large"),
+                "Error should be about message size: {}",
+                err
+            );
         }
     });
 
     // 4. Connect Client and Send Malicious Message
-    let connection = client_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+    let connection = client_endpoint
+        .connect(server_addr, "localhost")
+        .unwrap()
+        .await
+        .unwrap();
     let (mut send, mut _recv) = connection.open_bi().await.unwrap();
 
     // 5. Send Large Length Prefix

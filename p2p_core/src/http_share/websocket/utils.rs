@@ -145,7 +145,10 @@ mod tests {
     async fn test_create_secure_file_overwrite_permissions() {
         let temp_dir = std::env::temp_dir();
         // Use a unique name
-        let file_path = temp_dir.join(format!("secure_ws_overwrite_test_{}.txt", uuid::Uuid::new_v4()));
+        let file_path = temp_dir.join(format!(
+            "secure_ws_overwrite_test_{}.txt",
+            uuid::Uuid::new_v4()
+        ));
 
         // 1. Create file with 0o666 (rw-rw-rw-)
         {

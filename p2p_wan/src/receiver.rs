@@ -1,6 +1,6 @@
 use anyhow::Result;
-use p2p_core::{AppEvent, FileInfo};
 use p2p_core::transfer::utils::{open_secure_file, validate_transfer_info};
+use p2p_core::{AppEvent, FileInfo};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;

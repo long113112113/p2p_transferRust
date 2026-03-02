@@ -1,7 +1,7 @@
 use axum::serve;
 use futures_util::StreamExt;
 use p2p_core::http_share::server::create_router_with_websocket;
-use p2p_core::http_share::websocket::{UploadState, MAX_CONNECTIONS};
+use p2p_core::http_share::websocket::{MAX_CONNECTIONS, UploadState};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,10 +53,12 @@ async fn test_max_concurrent_connections_dos() {
 
                     // Read first message (should be rejection error if limit reached)
                     // We use timeout to verify immediate rejection or acceptance
-                    let msg_result = tokio::time::timeout(tokio::time::Duration::from_millis(2000), read.next()).await;
+                    let msg_result =
+                        tokio::time::timeout(tokio::time::Duration::from_millis(2000), read.next())
+                            .await;
                     (i, Ok((write, read, msg_result)))
-                },
-                Err(e) => (i, Err(e))
+                }
+                Err(e) => (i, Err(e)),
             }
         }));
     }
@@ -73,31 +75,33 @@ async fn test_max_concurrent_connections_dos() {
             Ok((write, read, msg_result)) => {
                 match msg_result {
                     Ok(Some(Ok(Message::Text(text)))) => {
-                        if text.contains("Too many concurrent connections") || text.contains("Too many connections from this IP") {
+                        if text.contains("Too many concurrent connections")
+                            || text.contains("Too many connections from this IP")
+                        {
                             println!("Client {} rejected: {}", i, text);
                             rejected_count += 1;
                         } else {
                             // Accepted (got other message?)
-                             _clients.push((write, read));
-                             accepted_count += 1;
+                            _clients.push((write, read));
+                            accepted_count += 1;
                         }
-                    },
+                    }
                     Ok(Some(Ok(Message::Close(_)))) => {
                         println!("Client {} closed immediately", i);
                         rejected_count += 1;
-                    },
+                    }
                     Err(_) => {
                         // Timeout - connection accepted and idle
                         _clients.push((write, read));
                         accepted_count += 1;
-                    },
+                    }
                     _ => {
                         // Other cases (error, none, etc)
-                         println!("Client {} other result: {:?}", i, msg_result);
-                         rejected_count += 1;
+                        println!("Client {} other result: {:?}", i, msg_result);
+                        rejected_count += 1;
                     }
                 }
-            },
+            }
             Err(e) => {
                 println!("Client {} failed to connect: {}", i, e);
                 rejected_count += 1;
@@ -107,6 +111,14 @@ async fn test_max_concurrent_connections_dos() {
 
     println!("Accepted: {}, Rejected: {}", accepted_count, rejected_count);
 
-    assert!(rejected_count >= 1, "Should have rejected at least some connections. Rejected: {}", rejected_count);
-    assert!(accepted_count <= MAX_CONNECTIONS, "Should not accept more than MAX_CONNECTIONS. Accepted: {}", accepted_count);
+    assert!(
+        rejected_count >= 1,
+        "Should have rejected at least some connections. Rejected: {}",
+        rejected_count
+    );
+    assert!(
+        accepted_count <= MAX_CONNECTIONS,
+        "Should not accept more than MAX_CONNECTIONS. Accepted: {}",
+        accepted_count
+    );
 }

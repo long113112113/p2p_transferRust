@@ -5,8 +5,8 @@ use super::messages::{
 };
 use super::state::{ActiveUploadGuard, WebSocketState};
 use super::utils::{cleanup_pending, create_secure_file, validate_file_info, wait_for_file_info};
-use crate::transfer::utils::sanitize_file_name;
 use crate::AppEvent;
+use crate::transfer::utils::sanitize_file_name;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
@@ -75,7 +75,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                     serde_json::to_string(&ServerMessage::Error {
                         message: "Too many connections from this IP".to_string(),
                     })
-                    .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                    .unwrap_or_else(|_| {
+                        "{\"type\":\"error\",\"message\":\"Internal serialization error\"}"
+                            .to_string()
+                    })
                     .into(),
                 ))
                 .await;
@@ -110,7 +113,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                 serde_json::to_string(&ServerMessage::Error {
                     message: "Too many concurrent connections".to_string(),
                 })
-                .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                .unwrap_or_else(|_| {
+                    "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string()
+                })
                 .into(),
             ))
             .await;
@@ -138,7 +143,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                     serde_json::to_string(&ServerMessage::Error {
                         message: "Expected file_info message".to_string(),
                     })
-                    .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                    .unwrap_or_else(|_| {
+                        "{\"type\":\"error\",\"message\":\"Internal serialization error\"}"
+                            .to_string()
+                    })
                     .into(),
                 ))
                 .await;
@@ -150,7 +158,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                     serde_json::to_string(&ServerMessage::Error {
                         message: "Handshake timed out".to_string(),
                     })
-                    .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                    .unwrap_or_else(|_| {
+                        "{\"type\":\"error\",\"message\":\"Internal serialization error\"}"
+                            .to_string()
+                    })
                     .into(),
                 ))
                 .await;
@@ -165,7 +176,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
         let _ = sender
             .send(Message::Text(
                 serde_json::to_string(&ServerMessage::Error { message: e })
-                    .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                    .unwrap_or_else(|_| {
+                        "{\"type\":\"error\",\"message\":\"Internal serialization error\"}"
+                            .to_string()
+                    })
                     .into(),
             ))
             .await;
@@ -199,7 +213,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                 serde_json::to_string(&ServerMessage::Error {
                     message: "Too many pending uploads".to_string(),
                 })
-                .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                .unwrap_or_else(|_| {
+                    "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string()
+                })
                 .into(),
             ))
             .await;
@@ -291,7 +307,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                 serde_json::to_string(&ServerMessage::Rejected {
                     reason: "User rejected the upload".to_string(),
                 })
-                .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                .unwrap_or_else(|_| {
+                    "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string()
+                })
                 .into(),
             ))
             .await;
@@ -305,7 +323,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                 serde_json::to_string(&ServerMessage::Rejected {
                     reason: "Too many active uploads".to_string(),
                 })
-                .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                .unwrap_or_else(|_| {
+                    "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string()
+                })
                 .into(),
             ))
             .await;
@@ -322,7 +342,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
             serde_json::to_string(&ServerMessage::Accepted {
                 request_id: request_id.clone(),
             })
-            .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+            .unwrap_or_else(|_| {
+                "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string()
+            })
             .into(),
         ))
         .await;
@@ -330,12 +352,15 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     // Prepare download path
     let download_dir = state.download_dir.clone();
     if let Err(e) = tokio::fs::create_dir_all(&download_dir).await {
+        tracing::error!("Failed to create download dir: {}", e);
         let _ = sender
             .send(Message::Text(
                 serde_json::to_string(&ServerMessage::Error {
-                    message: format!("Cannot create download dir: {}", e),
+                    message: "Cannot create download directory".to_string(),
                 })
-                .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                .unwrap_or_else(|_| {
+                    "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string()
+                })
                 .into(),
             ))
             .await;
@@ -346,12 +371,16 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     let mut file = match create_secure_file(&file_path).await {
         Ok(f) => f,
         Err(e) => {
+            tracing::error!("Failed to create secure file: {}", e);
             let _ = sender
                 .send(Message::Text(
                     serde_json::to_string(&ServerMessage::Error {
-                        message: format!("Cannot create file: {}", e),
+                        message: "Cannot create file".to_string(),
                     })
-                    .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                    .unwrap_or_else(|_| {
+                        "{\"type\":\"error\",\"message\":\"Internal serialization error\"}"
+                            .to_string()
+                    })
                     .into(),
                 ))
                 .await;
@@ -406,10 +435,11 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
                         };
 
                         if let Err(e) = file.write_all(to_write).await {
+                            tracing::error!("Failed to write to file: {}", e);
                             let _ = sender
                                 .send(Message::Text(
                                     serde_json::to_string(&ServerMessage::Error {
-                                        message: format!("Write error: {}", e),
+                                        message: "Write error occurred".to_string(),
                                     })
                                     .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
                                     .into(),
@@ -485,12 +515,15 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
 
     // Finalize
     if let Err(e) = file.flush().await {
+        tracing::error!("Failed to flush file: {}", e);
         let _ = sender
             .send(Message::Text(
                 serde_json::to_string(&ServerMessage::Error {
-                    message: format!("Flush error: {}", e),
+                    message: "Flush error occurred".to_string(),
                 })
-                .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                .unwrap_or_else(|_| {
+                    "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string()
+                })
                 .into(),
             ))
             .await;
@@ -503,7 +536,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     let _ = sender
         .send(Message::Text(
             serde_json::to_string(&ServerMessage::Complete)
-                .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string())
+                .unwrap_or_else(|_| {
+                    "{\"type\":\"error\",\"message\":\"Internal serialization error\"}".to_string()
+                })
                 .into(),
         ))
         .await;
