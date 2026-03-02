@@ -222,7 +222,12 @@ mod tests {
             // The sanitized name should NOT contain the invalid character
             // (except / and \ which are path separators and already handled by rsplit,
             // but sanitize_file_name handles them again in the filter just in case)
-            assert!(!sanitized.contains(c), "Character '{}' was not filtered out from '{}'", c, sanitized);
+            assert!(
+                !sanitized.contains(c),
+                "Character '{}' was not filtered out from '{}'",
+                c,
+                sanitized
+            );
         }
     }
 
@@ -262,7 +267,10 @@ mod tests {
     async fn test_open_secure_file_overwrite_permissions() {
         let temp_dir = std::env::temp_dir();
         // Use a unique name
-        let file_path = temp_dir.join(format!("secure_overwrite_test_{}.txt", uuid::Uuid::new_v4()));
+        let file_path = temp_dir.join(format!(
+            "secure_overwrite_test_{}.txt",
+            uuid::Uuid::new_v4()
+        ));
 
         // 1. Create file with 0o666 (rw-rw-rw-)
         {

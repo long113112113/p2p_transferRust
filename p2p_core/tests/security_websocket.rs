@@ -224,7 +224,8 @@ mod tests {
         let (tx, _rx) = mpsc::channel(100);
         let upload_state = Arc::new(UploadState::default());
         // Use a unique temp dir
-        let temp_dir = std::env::temp_dir().join(format!("p2p_test_msg_size_{}", uuid::Uuid::new_v4()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("p2p_test_msg_size_{}", uuid::Uuid::new_v4()));
         let _ = tokio::fs::create_dir_all(&temp_dir).await;
 
         let router = create_router_with_websocket(token, tx, upload_state, temp_dir.clone());
@@ -264,7 +265,7 @@ mod tests {
         // With limit 512KB, this should cause a protocol error (Close).
         let large_data = vec![0u8; 1024 * 1024]; // 1MB
         if let Err(e) = write.send(Message::Binary(large_data.into())).await {
-             println!("Send failed: {}", e);
+            println!("Send failed: {}", e);
         }
 
         // Check if connection is closed by server
@@ -273,10 +274,10 @@ mod tests {
         match result {
             Ok(Some(Ok(msg))) => {
                 if let Message::Close(close_frame) = msg {
-                     if let Some(frame) = close_frame {
+                    if let Some(frame) = close_frame {
                         // 1009 is Message Too Big
                         assert_eq!(frame.code, tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Size);
-                     }
+                    }
                 } else {
                     panic!("Server accepted 1MB message (should have rejected with size limit)");
                 }

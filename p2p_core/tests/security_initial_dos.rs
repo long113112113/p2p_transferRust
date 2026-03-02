@@ -21,7 +21,11 @@ async fn test_initial_connection_hang() {
 
     // 2. Connect client and HANG
     let client_endpoint = make_client_endpoint().unwrap();
-    let connection = client_endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
+    let connection = client_endpoint
+        .connect(server_addr, "localhost")
+        .unwrap()
+        .await
+        .unwrap();
     let (mut send, mut recv) = connection.open_bi().await.unwrap();
 
     // Send 1 byte to ensure server accepts the stream
@@ -36,7 +40,8 @@ async fn test_initial_connection_hang() {
     // If it timeouts, the server is still waiting (BAD).
 
     let mut buf = [0u8; 10];
-    let result = tokio::time::timeout(tokio::time::Duration::from_secs(6), recv.read(&mut buf)).await;
+    let result =
+        tokio::time::timeout(tokio::time::Duration::from_secs(6), recv.read(&mut buf)).await;
 
     match result {
         Ok(_) => {

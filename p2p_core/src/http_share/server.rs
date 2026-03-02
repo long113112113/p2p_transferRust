@@ -596,21 +596,25 @@ mod tests {
         // Should contain specific host
         assert!(
             csp.contains(&format!("ws://{}", host)),
-            "CSP should allow ws://{{host}} but got: {}", csp
+            "CSP should allow ws://{{host}} but got: {}",
+            csp
         );
         assert!(
             csp.contains(&format!("wss://{}", host)),
-            "CSP should allow wss://{{host}} but got: {}", csp
+            "CSP should allow wss://{{host}} but got: {}",
+            csp
         );
 
         // Should NOT contain wildcards
         assert!(
             !csp.contains(" ws: "),
-            "CSP should not contain wildcard 'ws:' but got: {}", csp
+            "CSP should not contain wildcard 'ws:' but got: {}",
+            csp
         );
         assert!(
             !csp.contains(" wss: "),
-            "CSP should not contain wildcard 'wss:' but got: {}", csp
+            "CSP should not contain wildcard 'wss:' but got: {}",
+            csp
         );
     }
 
@@ -647,13 +651,15 @@ mod tests {
         // Should NOT contain the injected host
         assert!(
             !csp.contains("evil.com"),
-            "CSP should not contain malicious host part but got: {}", csp
+            "CSP should not contain malicious host part but got: {}",
+            csp
         );
 
         // Should fall back to localhost
         assert!(
             csp.contains("ws://localhost"),
-            "CSP should fall back to localhost for invalid host but got: {}", csp
+            "CSP should fall back to localhost for invalid host but got: {}",
+            csp
         );
     }
 }
@@ -707,7 +713,10 @@ mod security_tests {
         assert_eq!(sanitize_host("[::1]:8080"), "[::1]:8080");
 
         // Injection attempts
-        assert_eq!(sanitize_host("example.com; script-src 'unsafe-inline'"), "localhost");
+        assert_eq!(
+            sanitize_host("example.com; script-src 'unsafe-inline'"),
+            "localhost"
+        );
         assert_eq!(sanitize_host("evil.com\r\nHeader: value"), "localhost");
     }
 }

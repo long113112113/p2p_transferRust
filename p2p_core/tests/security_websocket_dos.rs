@@ -1,13 +1,13 @@
+use futures_util::{SinkExt, StreamExt};
 use p2p_core::http_share::server::create_router_with_websocket;
-use p2p_core::http_share::websocket::{UploadState, ClientMessage};
+use p2p_core::http_share::websocket::{ClientMessage, UploadState};
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use std::path::PathBuf;
-use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use std::net::SocketAddr;
 
 #[tokio::test]
 async fn test_large_message_dos() {
@@ -55,17 +55,21 @@ async fn test_large_message_dos() {
 
     match result {
         Ok(Some(Ok(msg))) => {
-             if let Message::Close(frame) = msg {
-                 println!("Connection closed with frame: {:?}", frame);
-                 // 1009 is Message Too Big
-                 if let Some(f) = frame {
-                     assert_eq!(u16::from(f.code), 1009, "Should be closed with code 1009 (Message Too Big)");
-                 }
-             } else if let Message::Text(text) = msg {
-                 if text.contains("Expected file_info message") {
-                     panic!("Server accepted large message! Vulnerability present.");
-                 }
-             }
+            if let Message::Close(frame) = msg {
+                println!("Connection closed with frame: {:?}", frame);
+                // 1009 is Message Too Big
+                if let Some(f) = frame {
+                    assert_eq!(
+                        u16::from(f.code),
+                        1009,
+                        "Should be closed with code 1009 (Message Too Big)"
+                    );
+                }
+            } else if let Message::Text(text) = msg {
+                if text.contains("Expected file_info message") {
+                    panic!("Server accepted large message! Vulnerability present.");
+                }
+            }
         }
         Ok(Some(Err(e))) => {
             println!("Connection error as expected: {}", e);
@@ -74,8 +78,8 @@ async fn test_large_message_dos() {
             println!("Connection closed as expected");
         }
         Err(_) => {
-             // Timeout might happen if server is slow processing huge message
-             panic!("Timeout! Server accepted large message (likely).");
+            // Timeout might happen if server is slow processing huge message
+            panic!("Timeout! Server accepted large message (likely).");
         }
     }
 }
@@ -120,14 +124,16 @@ async fn test_normal_message_size() {
 
     match result {
         Ok(Some(Ok(msg))) => {
-             if let Message::Close(frame) = msg {
-                 if let Some(f) = frame {
-                     if u16::from(f.code) == 1009 {
-                         panic!("Connection closed with Message Too Big for 256KB message! Limit is too low.");
-                     }
-                 }
-             }
-             // Any other message (Text error, etc.) means it was accepted by WS layer.
+            if let Message::Close(frame) = msg {
+                if let Some(f) = frame {
+                    if u16::from(f.code) == 1009 {
+                        panic!(
+                            "Connection closed with Message Too Big for 256KB message! Limit is too low."
+                        );
+                    }
+                }
+            }
+            // Any other message (Text error, etc.) means it was accepted by WS layer.
         }
         Ok(Some(Err(_))) => {}
         Ok(None) => {}
