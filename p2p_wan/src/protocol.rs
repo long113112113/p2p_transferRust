@@ -37,6 +37,14 @@ pub async fn recv_msg(recv: &mut iroh::endpoint::RecvStream) -> Result<WanTransf
     recv.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
 
+    if len > p2p_core::transfer::constants::MAX_MSG_SIZE {
+        return Err(anyhow::anyhow!(
+            "Message too large: {} bytes (max {})",
+            len,
+            p2p_core::transfer::constants::MAX_MSG_SIZE
+        ));
+    }
+
     let mut buf = vec![0u8; len];
     recv.read_exact(&mut buf).await?;
 
