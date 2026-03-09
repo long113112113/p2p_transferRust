@@ -67,3 +67,8 @@
 **Vulnerability:** The `create_secure_file` and `open_secure_file` functions relied on `OpenOptions::mode(0o600)` to set permissions. However, `mode` only applies when a *new* file is created. If the file already existed (even if truncated), the existing permissions were preserved, allowing pre-created world-readable files to remain insecure.
 **Learning:** `OpenOptions` flags like `create` and `truncate` handle file content but do not enforce metadata (permissions) on existing files. Security-critical file operations must explicitly set permissions on the open file handle to ensure the intended state.
 **Prevention:** Always use `file.set_permissions()` on the open file handle when creating or overwriting sensitive files, rather than relying solely on creation-time flags.
+
+## 2024-05-24 - Insecure Default File Permissions for Configuration
+**Vulnerability:** Configuration files (`config.json` and `endpoint_id.txt`) containing sensitive endpoint IDs and pairing data were being created with default OS permissions (e.g. `0o644` and `0o755`) using `std::fs::write` and `std::fs::create_dir_all`.
+**Learning:** Default file creation methods do not provide adequate security for sensitive configuration data. In this repository, specific secure wrappers must be implemented to explicitly restrict permissions to the current user.
+**Prevention:** Use custom helper functions (like `write_secure_file` using `OpenOptionsExt` and `PermissionsExt` for `0o600`, and `create_secure_dir_all` using `DirBuilderExt` for `0o700`) instead of default `std::fs` operations for configuration directories and files. Ensure `OpenOptions::mode()` is supplemented with explicit `set_permissions` for files that may already exist.

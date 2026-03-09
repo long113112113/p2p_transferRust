@@ -2,8 +2,53 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+/// Write a file with secure permissions (0o600 on Unix)
+pub fn write_secure_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> std::io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let file = options.open(path)?;
+
+    // If file already existed, reset its permissions to 0o600
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = file.metadata()?.permissions();
+        if perms.mode() & 0o777 != 0o600 {
+            perms.set_mode(0o600);
+            file.set_permissions(perms)?;
+        }
+    }
+
+    use std::io::Write;
+    let mut writer = std::io::BufWriter::new(file);
+    writer.write_all(contents.as_ref())?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Create a directory and all its parents with secure permissions (0o700 on Unix)
+pub fn create_secure_dir_all<P: AsRef<Path>>(path: P) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+
+    builder.create(path)
+}
 
 const APP_QUALIFIER: &str = "com";
 const APP_ORGANIZATION: &str = "p2p";
@@ -70,11 +115,11 @@ impl AppConfig {
         };
 
         if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
+            let _ = create_secure_dir_all(parent);
         }
 
         if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = fs::write(path, json);
+            let _ = write_secure_file(path, json);
         }
     }
 }
@@ -103,12 +148,12 @@ pub fn get_or_create_endpoint_id() -> String {
 
     let new_id = Uuid::new_v4().to_string();
 
-    if let Err(e) = fs::create_dir_all(&config_dir) {
+    if let Err(e) = create_secure_dir_all(&config_dir) {
         eprintln!("Warning: Could not create config dir: {}", e);
         return new_id;
     }
 
-    if let Err(e) = fs::write(&endpoint_id_path, &new_id) {
+    if let Err(e) = write_secure_file(&endpoint_id_path, &new_id) {
         eprintln!("Warning: Could not save endpoint ID: {}", e);
     }
 
