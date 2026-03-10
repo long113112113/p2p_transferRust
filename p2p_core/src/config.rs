@@ -2,8 +2,43 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use std::io;
+
+#[cfg(unix)]
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+
+pub fn create_secure_dir_all<P: AsRef<Path>>(path: P) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+
+    #[cfg(unix)]
+    builder.mode(0o700);
+
+    builder.create(path)
+}
+
+pub fn write_secure_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+
+    #[cfg(unix)]
+    options.mode(0o600);
+
+    let file = options.open(&path)?;
+
+    #[cfg(unix)]
+    {
+        let mut perms = file.metadata()?.permissions();
+        perms.set_mode(0o600);
+        file.set_permissions(perms)?;
+    }
+
+    use std::io::Write;
+    let mut file = file; // re-bind to avoid 'mut' unused warning on non-unix
+    file.write_all(contents.as_ref())
+}
 
 const APP_QUALIFIER: &str = "com";
 const APP_ORGANIZATION: &str = "p2p";
@@ -70,11 +105,11 @@ impl AppConfig {
         };
 
         if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
+            let _ = create_secure_dir_all(parent);
         }
 
         if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = fs::write(path, json);
+            let _ = write_secure_file(path, json);
         }
     }
 }
@@ -103,12 +138,12 @@ pub fn get_or_create_endpoint_id() -> String {
 
     let new_id = Uuid::new_v4().to_string();
 
-    if let Err(e) = fs::create_dir_all(&config_dir) {
+    if let Err(e) = create_secure_dir_all(&config_dir) {
         eprintln!("Warning: Could not create config dir: {}", e);
         return new_id;
     }
 
-    if let Err(e) = fs::write(&endpoint_id_path, &new_id) {
+    if let Err(e) = write_secure_file(&endpoint_id_path, &new_id) {
         eprintln!("Warning: Could not save endpoint ID: {}", e);
     }
 
