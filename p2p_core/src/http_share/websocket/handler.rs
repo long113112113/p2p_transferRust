@@ -23,14 +23,13 @@ struct ConnectionGuard {
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         self.state.connection_count.fetch_sub(1, Ordering::SeqCst);
-        if let Ok(mut counts) = self.state.ip_counts.lock() {
-            if let Some(count) = counts.get_mut(&self.client_ip) {
-                if *count > 0 {
-                    *count -= 1;
-                }
-                if *count == 0 {
-                    counts.remove(&self.client_ip);
-                }
+        let mut counts = self.state.ip_counts.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(count) = counts.get_mut(&self.client_ip) {
+            if *count > 0 {
+                *count -= 1;
+            }
+            if *count == 0 {
+                counts.remove(&self.client_ip);
             }
         }
     }
@@ -95,7 +94,8 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
             current_connections + 1
         );
         // Decrement IP count since we are rejecting
-        if let Ok(mut counts) = state.ip_counts.lock() {
+        {
+            let mut counts = state.ip_counts.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(count) = counts.get_mut(&client_ip) {
                 if *count > 0 {
                     *count -= 1;
