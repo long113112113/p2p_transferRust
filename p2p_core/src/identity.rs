@@ -27,6 +27,18 @@ impl IdentityManager {
             let key_bytes = fs::read(&key_path)
                 .await
                 .context("Failed to read secret key file")?;
+
+            // Check if existing file has wrong permissions and fix them
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&key_path).await?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    fs::set_permissions(&key_path, perms).await?;
+                }
+            }
+
             let bytes: [u8; 32] = key_bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
@@ -52,6 +64,16 @@ impl IdentityManager {
                 .await
                 .context("Failed to open secret key file for writing")?;
 
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms).await?;
+                }
+            }
+
             file.write_all(&secret_key.to_bytes())
                 .await
                 .context("Failed to write secret key")?;
@@ -67,6 +89,18 @@ impl IdentityManager {
         if key_path.exists() {
             tracing::info!("Loading existing identity from {:?}", key_path);
             let key_bytes = std::fs::read(&key_path).context("Failed to read secret key file")?;
+
+            // Check if existing file has wrong permissions and fix them
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&key_path)?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    std::fs::set_permissions(&key_path, perms)?;
+                }
+            }
+
             let bytes: [u8; 32] = key_bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
@@ -89,6 +123,16 @@ impl IdentityManager {
             let mut file = options
                 .open(&key_path)
                 .context("Failed to open secret key file for writing")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata()?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms)?;
+                }
+            }
 
             file.write_all(&secret_key.to_bytes())
                 .context("Failed to write secret key")?;
@@ -120,5 +164,113 @@ pub fn get_iroh_endpoint_id() -> String {
             // Fallback to UUID if Iroh fails
             uuid::Uuid::new_v4().to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_load_or_generate_permissions() {
+        let temp_dir = std::env::temp_dir().join(format!("p2p_identity_test_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).await.unwrap();
+
+        let manager = IdentityManager::new(temp_dir.clone());
+        let key_path = manager.get_key_path();
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        {
+            // First we need to generate a valid key to put in there to pass the length check if it loads it
+            let secret_key = SecretKey::generate(&mut rand::rng());
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&key_path)
+                .await
+                .expect("Failed to create initial file");
+
+            file.write_all(&secret_key.to_bytes()).await.unwrap();
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).await.unwrap();
+            }
+        }
+
+        // 2. Overwrite using load_or_generate
+        let _key = manager.load_or_generate().await.expect("Failed to load/generate identity");
+
+        // 3. Verify permissions are now 0o600
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = fs::metadata(&key_path)
+                .await
+                .expect("Failed to get metadata");
+            let permissions = metadata.permissions();
+            assert_eq!(
+                permissions.mode() & 0o777,
+                0o600,
+                "File permissions should be reset to 0o600 upon overwrite"
+            );
+        }
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn test_load_or_generate_sync_permissions() {
+        let temp_dir = std::env::temp_dir().join(format!("p2p_identity_test_sync_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let manager = IdentityManager::new(temp_dir.clone());
+        let key_path = manager.get_key_path();
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        {
+            // First we need to generate a valid key to put in there to pass the length check if it loads it
+            use std::io::Write;
+            let secret_key = SecretKey::generate(&mut rand::rng());
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&key_path)
+                .expect("Failed to create initial file");
+
+            file.write_all(&secret_key.to_bytes()).unwrap();
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).unwrap();
+            }
+        }
+
+        // 2. Overwrite using load_or_generate_sync
+        let _key = manager.load_or_generate_sync().expect("Failed to load/generate identity");
+
+        // 3. Verify permissions are now 0o600
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = std::fs::metadata(&key_path)
+                .expect("Failed to get metadata");
+            let permissions = metadata.permissions();
+            assert_eq!(
+                permissions.mode() & 0o777,
+                0o600,
+                "File permissions should be reset to 0o600 upon overwrite"
+            );
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
