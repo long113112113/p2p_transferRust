@@ -47,11 +47,22 @@ impl IdentityManager {
             #[cfg(unix)]
             options.mode(0o600);
 
-            let mut file = options
+            let file = options
                 .open(&key_path)
                 .await
                 .context("Failed to open secret key file for writing")?;
 
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms).await?;
+                }
+            }
+
+            let mut file = file; // Ensure mutable reference for write_all
             file.write_all(&secret_key.to_bytes())
                 .await
                 .context("Failed to write secret key")?;
@@ -86,10 +97,21 @@ impl IdentityManager {
             options.mode(0o600);
 
             use std::io::Write;
-            let mut file = options
+            let file = options
                 .open(&key_path)
                 .context("Failed to open secret key file for writing")?;
 
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata()?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms)?;
+                }
+            }
+
+            let mut file = file; // Ensure mutable reference for write_all
             file.write_all(&secret_key.to_bytes())
                 .context("Failed to write secret key")?;
 
