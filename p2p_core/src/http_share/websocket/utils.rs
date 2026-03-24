@@ -162,9 +162,9 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-            let mut perms = file.metadata().await.unwrap().permissions();
+                let mut perms = file.metadata().await.expect("Failed to get metadata").permissions();
                 perms.set_mode(0o666);
-            file.set_permissions(perms).await.unwrap();
+                file.set_permissions(perms).await.expect("Failed to set permissions");
             }
         }
 
