@@ -52,6 +52,16 @@ impl IdentityManager {
                 .await
                 .context("Failed to open secret key file for writing")?;
 
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.context("Failed to get metadata")?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms).await.context("Failed to set permissions")?;
+                }
+            }
+
             file.write_all(&secret_key.to_bytes())
                 .await
                 .context("Failed to write secret key")?;
@@ -90,6 +100,16 @@ impl IdentityManager {
                 .open(&key_path)
                 .context("Failed to open secret key file for writing")?;
 
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().context("Failed to get metadata")?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms).context("Failed to set permissions")?;
+                }
+            }
+
             file.write_all(&secret_key.to_bytes())
                 .context("Failed to write secret key")?;
 
@@ -120,5 +140,103 @@ pub fn get_iroh_endpoint_id() -> String {
             // Fallback to UUID if Iroh fails
             uuid::Uuid::new_v4().to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_identity_manager_overwrite_permissions() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "p2p_identity_test_{}",
+            uuid::Uuid::new_v4()
+        ));
+
+        let manager = IdentityManager::new(temp_dir.clone());
+        let key_path = manager.get_key_path();
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        if let Some(parent) = key_path.parent() {
+            tokio::fs::create_dir_all(parent).await.unwrap();
+        }
+
+        {
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&key_path)
+                .await
+                .expect("Failed to create initial file");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).await.unwrap();
+            }
+        }
+
+        // Remove the empty file because `load_or_generate` tries to read it if it exists
+        tokio::fs::remove_file(&key_path).await.unwrap();
+
+        // Generate the identity file.
+        let _key = manager.load_or_generate().await.unwrap();
+
+        // 3. Verify permissions are now 0o600
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = tokio::fs::metadata(&key_path)
+                .await
+                .expect("Failed to get metadata");
+            let permissions = metadata.permissions();
+            assert_eq!(
+                permissions.mode() & 0o777,
+                0o600,
+                "File permissions should be 0o600 upon generation"
+            );
+        }
+
+        // Cleanup
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn test_identity_manager_sync_overwrite_permissions() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "p2p_identity_test_sync_{}",
+            uuid::Uuid::new_v4()
+        ));
+
+        let manager = IdentityManager::new(temp_dir.clone());
+        let key_path = manager.get_key_path();
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        if let Some(parent) = key_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+
+        // Just verify it generates with 0o600
+        let _key = manager.load_or_generate_sync().unwrap();
+
+        // 3. Verify permissions are now 0o600
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = std::fs::metadata(&key_path)
+                .expect("Failed to get metadata");
+            let permissions = metadata.permissions();
+            assert_eq!(
+                permissions.mode() & 0o777,
+                0o600,
+                "File permissions should be 0o600 upon generation"
+            );
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
