@@ -42,7 +42,7 @@ impl IdentityManager {
 
             // Use OpenOptions to set file permissions to 600 (read/write only by owner)
             let mut options = fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+            options.write(true).create_new(true);
 
             #[cfg(unix)]
             options.mode(0o600);
@@ -51,6 +51,18 @@ impl IdentityManager {
                 .open(&key_path)
                 .await
                 .context("Failed to open secret key file for writing")?;
+
+            // Explicitly set permissions to prevent TOCTOU in case file already existed
+            // (even with create_new(true), it's good defense in depth for overwrites if we change behavior later)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await?.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms).await?;
+                }
+            }
 
             file.write_all(&secret_key.to_bytes())
                 .await
@@ -80,7 +92,7 @@ impl IdentityManager {
 
             // Use OpenOptions to set file permissions to 600 (read/write only by owner)
             let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+            options.write(true).create_new(true);
 
             #[cfg(unix)]
             options.mode(0o600);
@@ -89,6 +101,21 @@ impl IdentityManager {
             let mut file = options
                 .open(&key_path)
                 .context("Failed to open secret key file for writing")?;
+
+            // Explicitly set permissions to prevent TOCTOU in case file already existed
+            // (even with create_new(true), it's good defense in depth for overwrites if we change behavior later)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata()
+                    .context("Failed to get metadata for secret key file")?
+                    .permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms)
+                        .context("Failed to set permissions on secret key file")?;
+                }
+            }
 
             file.write_all(&secret_key.to_bytes())
                 .context("Failed to write secret key")?;
