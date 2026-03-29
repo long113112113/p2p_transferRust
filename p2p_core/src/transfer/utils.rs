@@ -89,10 +89,7 @@ pub fn generate_self_signed_cert()
 pub fn sanitize_file_name(file_name: &str) -> String {
     // 1. Get the last component using string splitting to be OS-agnostic
     // Split by / and \ and take the last part
-    let file_name = file_name
-        .rsplit(|c| c == '/' || c == '\\')
-        .next()
-        .unwrap_or(file_name);
+    let file_name = file_name.rsplit(['/', '\\']).next().unwrap_or(file_name);
 
     // 2. Filter characters
     // Disallow control characters, path separators, and Windows reserved characters (<>:"/\|?*)
@@ -284,9 +281,9 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-            let mut perms = file.metadata().await.unwrap().permissions();
+                let mut perms = file.metadata().await.unwrap().permissions();
                 perms.set_mode(0o666);
-            file.set_permissions(perms).await.unwrap();
+                file.set_permissions(perms).await.unwrap();
             }
         }
 

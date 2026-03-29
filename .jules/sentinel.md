@@ -67,3 +67,8 @@
 **Vulnerability:** The `create_secure_file` and `open_secure_file` functions relied on `OpenOptions::mode(0o600)` to set permissions. However, `mode` only applies when a *new* file is created. If the file already existed (even if truncated), the existing permissions were preserved, allowing pre-created world-readable files to remain insecure.
 **Learning:** `OpenOptions` flags like `create` and `truncate` handle file content but do not enforce metadata (permissions) on existing files. Security-critical file operations must explicitly set permissions on the open file handle to ensure the intended state.
 **Prevention:** Always use `file.set_permissions()` on the open file handle when creating or overwriting sensitive files, rather than relying solely on creation-time flags.
+
+## 2024-05-25 - File Permission Persistence on Overwrite in node_secret.key
+**Vulnerability:** The `load_or_generate` and `load_or_generate_sync` functions relied on `OpenOptions::mode(0o600)` to set permissions. However, `mode` only applies when a *new* file is created. If the `node_secret.key` file already existed (even if truncated with `truncate(true)`), the existing permissions were preserved, allowing potentially world-readable files to remain insecure.
+**Learning:** `OpenOptions` flags handle file content but do not enforce metadata (permissions) on existing files. Security-critical file operations must explicitly set permissions on the open file handle to ensure the intended state, particularly on highly sensitive files like private keys.
+**Prevention:** Always use `file.set_permissions()` on the open file handle when creating or overwriting sensitive files, rather than relying solely on creation-time flags.

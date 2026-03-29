@@ -52,6 +52,22 @@ impl IdentityManager {
                 .await
                 .context("Failed to open secret key file for writing")?;
 
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file
+                    .metadata()
+                    .await
+                    .context("Failed to read metadata")?
+                    .permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms)
+                        .await
+                        .context("Failed to set permissions")?;
+                }
+            }
+
             file.write_all(&secret_key.to_bytes())
                 .await
                 .context("Failed to write secret key")?;
@@ -89,6 +105,20 @@ impl IdentityManager {
             let mut file = options
                 .open(&key_path)
                 .context("Failed to open secret key file for writing")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file
+                    .metadata()
+                    .context("Failed to read metadata")?
+                    .permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    file.set_permissions(perms)
+                        .context("Failed to set permissions")?;
+                }
+            }
 
             file.write_all(&secret_key.to_bytes())
                 .context("Failed to write secret key")?;
