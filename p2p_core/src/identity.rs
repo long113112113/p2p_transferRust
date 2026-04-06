@@ -22,41 +22,43 @@ impl IdentityManager {
     pub async fn load_or_generate(&self) -> Result<SecretKey> {
         let key_path = self.config_dir.join(KEY_FILE_NAME);
 
-        if key_path.exists() {
-            tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = fs::read(&key_path)
-                .await
-                .context("Failed to read secret key file")?;
-            let bytes: [u8; 32] = key_bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
+        match fs::read(&key_path).await {
+            Ok(key_bytes) => {
+                tracing::info!("Loading existing identity from {:?}", key_path);
+                let bytes: [u8; 32] = key_bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
 
-            Ok(SecretKey::from_bytes(&bytes))
-        } else {
-            let secret_key = SecretKey::generate(&mut rand::rng());
-            if let Some(parent) = key_path.parent() {
-                fs::create_dir_all(parent)
-                    .await
-                    .context("Failed to create config directory")?;
+                Ok(SecretKey::from_bytes(&bytes))
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let secret_key = SecretKey::generate(&mut rand::rng());
+                if let Some(parent) = key_path.parent() {
+                    fs::create_dir_all(parent)
+                        .await
+                        .context("Failed to create config directory")?;
+                }
 
-            // Use OpenOptions to set file permissions to 600 (read/write only by owner)
-            let mut options = fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+                // Use OpenOptions to set file permissions to 600 (read/write only by owner)
+                // Use create_new(true) to avoid TOCTOU vulnerability
+                let mut options = fs::OpenOptions::new();
+                options.write(true).create_new(true);
 
-            #[cfg(unix)]
-            options.mode(0o600);
+                #[cfg(unix)]
+                options.mode(0o600);
 
-            let mut file = options
-                .open(&key_path)
-                .await
-                .context("Failed to open secret key file for writing")?;
+                let mut file = options
+                    .open(&key_path)
+                    .await
+                    .context("Failed to open secret key file for writing")?;
 
-            file.write_all(&secret_key.to_bytes())
-                .await
-                .context("Failed to write secret key")?;
+                file.write_all(&secret_key.to_bytes())
+                    .await
+                    .context("Failed to write secret key")?;
 
-            Ok(secret_key)
+                Ok(secret_key)
+            }
+            Err(e) => Err(e).context("Failed to read secret key file"),
         }
     }
 
@@ -64,36 +66,40 @@ impl IdentityManager {
     pub fn load_or_generate_sync(&self) -> Result<SecretKey> {
         let key_path = self.config_dir.join(KEY_FILE_NAME);
 
-        if key_path.exists() {
-            tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = std::fs::read(&key_path).context("Failed to read secret key file")?;
-            let bytes: [u8; 32] = key_bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
+        match std::fs::read(&key_path) {
+            Ok(key_bytes) => {
+                tracing::info!("Loading existing identity from {:?}", key_path);
+                let bytes: [u8; 32] = key_bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
 
-            Ok(SecretKey::from_bytes(&bytes))
-        } else {
-            let secret_key = SecretKey::generate(&mut rand::rng());
-            if let Some(parent) = key_path.parent() {
-                std::fs::create_dir_all(parent).context("Failed to create config directory")?;
+                Ok(SecretKey::from_bytes(&bytes))
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let secret_key = SecretKey::generate(&mut rand::rng());
+                if let Some(parent) = key_path.parent() {
+                    std::fs::create_dir_all(parent).context("Failed to create config directory")?;
+                }
 
-            // Use OpenOptions to set file permissions to 600 (read/write only by owner)
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+                // Use OpenOptions to set file permissions to 600 (read/write only by owner)
+                // Use create_new(true) to avoid TOCTOU vulnerability
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
 
-            #[cfg(unix)]
-            options.mode(0o600);
+                #[cfg(unix)]
+                options.mode(0o600);
 
-            use std::io::Write;
-            let mut file = options
-                .open(&key_path)
-                .context("Failed to open secret key file for writing")?;
+                use std::io::Write;
+                let mut file = options
+                    .open(&key_path)
+                    .context("Failed to open secret key file for writing")?;
 
-            file.write_all(&secret_key.to_bytes())
-                .context("Failed to write secret key")?;
+                file.write_all(&secret_key.to_bytes())
+                    .context("Failed to write secret key")?;
 
-            Ok(secret_key)
+                Ok(secret_key)
+            }
+            Err(e) => Err(e).context("Failed to read secret key file"),
         }
     }
 

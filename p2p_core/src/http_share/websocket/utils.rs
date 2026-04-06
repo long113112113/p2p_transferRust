@@ -13,23 +13,13 @@ use tokio::time::timeout;
 /// Create a file with secure permissions (0o600 on Unix)
 pub async fn create_secure_file(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    // Using create_new(true) instead of create(true) prevents TOCTOU vulnerability
+    options.write(true).create_new(true);
 
     #[cfg(unix)]
     options.mode(0o600);
 
     let file = options.open(path).await?;
-
-    // Explicitly set permissions to ensure security even if file already existed
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = file.metadata().await?.permissions();
-        if perms.mode() & 0o777 != 0o600 {
-            perms.set_mode(0o600);
-            file.set_permissions(perms).await?;
-        }
-    }
 
     Ok(file)
 }
@@ -168,25 +158,12 @@ mod tests {
             }
         }
 
-        // 2. Overwrite using create_secure_file
-        let _file = create_secure_file(&file_path)
-            .await
-            .expect("Failed to create secure file");
+        // 2. Attempt to create using create_secure_file - should fail securely
+        let result = create_secure_file(&file_path).await;
 
-        // 3. Verify permissions are now 0o600
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let metadata = tokio::fs::metadata(&file_path)
-                .await
-                .expect("Failed to get metadata");
-            let permissions = metadata.permissions();
-            assert_eq!(
-                permissions.mode() & 0o777,
-                0o600,
-                "File permissions should be reset to 0o600 upon overwrite"
-            );
-        }
+        // 3. Verify it securely rejects the existing file
+        assert!(result.is_err(), "create_secure_file should return an error when file already exists");
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
 
         // Cleanup
         let _ = tokio::fs::remove_file(&file_path).await;
