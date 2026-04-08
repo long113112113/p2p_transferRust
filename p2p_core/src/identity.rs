@@ -31,32 +31,44 @@ impl IdentityManager {
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
 
-            Ok(SecretKey::from_bytes(&bytes))
-        } else {
-            let secret_key = SecretKey::generate(&mut rand::rng());
-            if let Some(parent) = key_path.parent() {
-                fs::create_dir_all(parent)
+            return Ok(SecretKey::from_bytes(&bytes));
+        }
+
+        let secret_key = SecretKey::generate(&mut rand::rng());
+        if let Some(parent) = key_path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .context("Failed to create config directory")?;
+        }
+
+        // Try to create a new file exclusively to avoid TOCTOU
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+
+        #[cfg(unix)]
+        options.mode(0o600);
+
+        match options.open(&key_path).await {
+            Ok(mut file) => {
+                // Successfully created exclusively
+                file.write_all(&secret_key.to_bytes())
                     .await
-                    .context("Failed to create config directory")?;
+                    .context("Failed to write secret key")?;
+                Ok(secret_key)
             }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // File already exists, load it
+                tracing::info!("Loading existing identity from {:?}", key_path);
+                let key_bytes = fs::read(&key_path)
+                    .await
+                    .context("Failed to read secret key file")?;
+                let bytes: [u8; 32] = key_bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
 
-            // Use OpenOptions to set file permissions to 600 (read/write only by owner)
-            let mut options = fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
-
-            #[cfg(unix)]
-            options.mode(0o600);
-
-            let mut file = options
-                .open(&key_path)
-                .await
-                .context("Failed to open secret key file for writing")?;
-
-            file.write_all(&secret_key.to_bytes())
-                .await
-                .context("Failed to write secret key")?;
-
-            Ok(secret_key)
+                Ok(SecretKey::from_bytes(&bytes))
+            }
+            Err(e) => Err(anyhow::Error::from(e).context("Failed to open secret key file for writing")),
         }
     }
 
@@ -71,29 +83,40 @@ impl IdentityManager {
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
 
-            Ok(SecretKey::from_bytes(&bytes))
-        } else {
-            let secret_key = SecretKey::generate(&mut rand::rng());
-            if let Some(parent) = key_path.parent() {
-                std::fs::create_dir_all(parent).context("Failed to create config directory")?;
+            return Ok(SecretKey::from_bytes(&bytes));
+        }
+
+        let secret_key = SecretKey::generate(&mut rand::rng());
+        if let Some(parent) = key_path.parent() {
+            std::fs::create_dir_all(parent).context("Failed to create config directory")?;
+        }
+
+        // Try to create a new file exclusively to avoid TOCTOU
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+
+        #[cfg(unix)]
+        options.mode(0o600);
+
+        use std::io::Write;
+        match options.open(&key_path) {
+            Ok(mut file) => {
+                // Successfully created exclusively
+                file.write_all(&secret_key.to_bytes())
+                    .context("Failed to write secret key")?;
+                Ok(secret_key)
             }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // File already exists, load it
+                tracing::info!("Loading existing identity from {:?}", key_path);
+                let key_bytes = std::fs::read(&key_path).context("Failed to read secret key file")?;
+                let bytes: [u8; 32] = key_bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
 
-            // Use OpenOptions to set file permissions to 600 (read/write only by owner)
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
-
-            #[cfg(unix)]
-            options.mode(0o600);
-
-            use std::io::Write;
-            let mut file = options
-                .open(&key_path)
-                .context("Failed to open secret key file for writing")?;
-
-            file.write_all(&secret_key.to_bytes())
-                .context("Failed to write secret key")?;
-
-            Ok(secret_key)
+                Ok(SecretKey::from_bytes(&bytes))
+            }
+            Err(e) => Err(anyhow::Error::from(e).context("Failed to open secret key file for writing")),
         }
     }
 
@@ -120,5 +143,44 @@ pub fn get_iroh_endpoint_id() -> String {
             // Fallback to UUID if Iroh fails
             uuid::Uuid::new_v4().to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[tokio::test]
+    async fn test_toctou_precreated_file() {
+        let temp_dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let key_path = temp_dir.join(KEY_FILE_NAME);
+
+        // Pre-create the file with a known key and permissive permissions
+        let known_key = SecretKey::generate(&mut rand::rng());
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        let mut file = options.open(&key_path).unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = file.metadata().unwrap().permissions();
+            perms.set_mode(0o666); // Highly permissive
+            file.set_permissions(perms).unwrap();
+        }
+        file.write_all(&known_key.to_bytes()).unwrap();
+
+        let manager = IdentityManager::new(temp_dir.clone());
+
+        // This should read the existing file, NOT overwrite it
+        let loaded_key = manager.load_or_generate().await.unwrap();
+
+        assert_eq!(loaded_key.to_bytes(), known_key.to_bytes());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
