@@ -67,3 +67,8 @@
 **Vulnerability:** The `create_secure_file` and `open_secure_file` functions relied on `OpenOptions::mode(0o600)` to set permissions. However, `mode` only applies when a *new* file is created. If the file already existed (even if truncated), the existing permissions were preserved, allowing pre-created world-readable files to remain insecure.
 **Learning:** `OpenOptions` flags like `create` and `truncate` handle file content but do not enforce metadata (permissions) on existing files. Security-critical file operations must explicitly set permissions on the open file handle to ensure the intended state.
 **Prevention:** Always use `file.set_permissions()` on the open file handle when creating or overwriting sensitive files, rather than relying solely on creation-time flags.
+
+## 2025-02-28 - TOCTOU in Identity File Creation
+**Vulnerability:** The secret key file creation (`node_secret.key`) used `create(true).truncate(true)` along with a subsequent check/set of permissions (`chmod`). This created a Time-of-Check to Time-of-Use (TOCTOU) vulnerability where an attacker could pre-create a world-readable file, keep an open file descriptor, and continue reading the file even after the permissions were restricted.
+**Learning:** Setting permissions after opening an existing file is insufficient if an attacker can predict the filename and pre-create it. They can maintain access through an open file handle, bypassing later permission restrictions.
+**Prevention:** Always use `OpenOptions::create_new(true)` when creating sensitive files (like secret keys). This ensures atomic file creation with secure permissions and fails safely if the file already exists.

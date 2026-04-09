@@ -41,16 +41,15 @@ impl IdentityManager {
             }
 
             // Use OpenOptions to set file permissions to 600 (read/write only by owner)
+            // Use create_new(true) to prevent TOCTOU race conditions where an attacker could pre-create
+            // the file and keep a file descriptor open to read the secret key.
             let mut options = fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+            options.write(true).create_new(true);
 
             #[cfg(unix)]
             options.mode(0o600);
 
-            let mut file = options
-                .open(&key_path)
-                .await
-                .context("Failed to open secret key file for writing")?;
+            let mut file = options.open(&key_path).await.context("Failed to open secret key file for writing securely")?;
 
             file.write_all(&secret_key.to_bytes())
                 .await
@@ -79,16 +78,16 @@ impl IdentityManager {
             }
 
             // Use OpenOptions to set file permissions to 600 (read/write only by owner)
+            // Use create_new(true) to prevent TOCTOU race conditions where an attacker could pre-create
+            // the file and keep a file descriptor open to read the secret key.
             let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+            options.write(true).create_new(true);
 
             #[cfg(unix)]
             options.mode(0o600);
 
             use std::io::Write;
-            let mut file = options
-                .open(&key_path)
-                .context("Failed to open secret key file for writing")?;
+            let mut file = options.open(&key_path).context("Failed to open secret key file for writing securely")?;
 
             file.write_all(&secret_key.to_bytes())
                 .context("Failed to write secret key")?;
