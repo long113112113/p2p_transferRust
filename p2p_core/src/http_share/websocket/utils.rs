@@ -12,24 +12,16 @@ use tokio::time::timeout;
 
 /// Create a file with secure permissions (0o600 on Unix)
 pub async fn create_secure_file(path: &Path) -> std::io::Result<File> {
+    // Unlink any existing file to prevent TOCTOU vulnerabilities and ensure atomic creation
+    let _ = tokio::fs::remove_file(path).await;
+
     let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
 
     #[cfg(unix)]
     options.mode(0o600);
 
     let file = options.open(path).await?;
-
-    // Explicitly set permissions to ensure security even if file already existed
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = file.metadata().await?.permissions();
-        if perms.mode() & 0o777 != 0o600 {
-            perms.set_mode(0o600);
-            file.set_permissions(perms).await?;
-        }
-    }
 
     Ok(file)
 }
@@ -162,16 +154,14 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-            let mut perms = file.metadata().await.unwrap().permissions();
+                let mut perms = file.metadata().await.unwrap().permissions();
                 perms.set_mode(0o666);
-            file.set_permissions(perms).await.unwrap();
+                file.set_permissions(perms).await.unwrap();
             }
         }
 
         // 2. Overwrite using create_secure_file
-        let _file = create_secure_file(&file_path)
-            .await
-            .expect("Failed to create secure file");
+        let _file = create_secure_file(&file_path).await.unwrap();
 
         // 3. Verify permissions are now 0o600
         #[cfg(unix)]

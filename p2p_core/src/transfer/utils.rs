@@ -1,26 +1,23 @@
+use super::constants::{MAX_FILENAME_LENGTH, MAX_FILE_SIZE};
 use crate::AppEvent;
-use crate::transfer::constants::{MAX_FILE_SIZE, MAX_FILENAME_LENGTH};
-use anyhow::Result;
-use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+use rcgen::generate_simple_self_signed;
 use std::path::Path;
 use std::time::Instant;
 use tokio::fs::{File, OpenOptions};
 use tokio::sync::mpsc;
 
-/// Validate file info against security limits (size and name length)
-pub fn validate_transfer_info(file_name: &str, file_size: u64) -> Result<()> {
+/// Validate transfer request against security constraints
+pub fn validate_transfer_info(file_name: &str, file_size: u64) -> Result<(), String> {
     if file_size > MAX_FILE_SIZE {
-        return Err(anyhow::anyhow!(
-            "File rejected: {} ({} GB) exceeds maximum allowed size of {} GB",
-            file_name,
-            file_size / (1024 * 1024 * 1024),
-            MAX_FILE_SIZE / (1024 * 1024 * 1024)
+        return Err(format!(
+            "File rejected: Too large ({} bytes, max {} bytes)",
+            file_size, MAX_FILE_SIZE
         ));
     }
 
     if file_name.len() > MAX_FILENAME_LENGTH {
-        return Err(anyhow::anyhow!(
+        return Err(format!(
             "File rejected: Filename too long ({} chars, max {})",
             file_name.len(),
             MAX_FILENAME_LENGTH
@@ -37,26 +34,14 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
     if offset > 0 {
         options.append(true);
     } else {
-        options.create(true).truncate(true);
+        // Unlink any existing file to prevent TOCTOU vulnerabilities and ensure atomic creation
+        let _ = tokio::fs::remove_file(path).await;
+        options.create_new(true);
         #[cfg(unix)]
         options.mode(0o600);
     }
 
     let file = options.open(path).await?;
-
-    // If starting a new file (offset == 0), ensure secure permissions
-    // This is necessary because mode() only applies to new files, not existing ones
-    if offset == 0 {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = file.metadata().await?.permissions();
-            if perms.mode() & 0o777 != 0o600 {
-                perms.set_mode(0o600);
-                file.set_permissions(perms).await?;
-            }
-        }
-    }
 
     Ok(file)
 }
@@ -79,7 +64,7 @@ pub fn format_transfer_speed(bytes_transferred: u64, elapsed_secs: f64) -> Strin
 
 /// Generate a self-signed certificate for QUIC and HTTPS
 pub fn generate_self_signed_cert()
--> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>)> {
+-> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>), rcgen::Error> {
     let certified_key = generate_simple_self_signed(vec!["localhost".to_string()])?;
     let key = PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der());
     let cert_der = CertificateDer::from(certified_key.cert.der().to_vec());
@@ -284,16 +269,14 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-            let mut perms = file.metadata().await.unwrap().permissions();
+                let mut perms = file.metadata().await.unwrap().permissions();
                 perms.set_mode(0o666);
-            file.set_permissions(perms).await.unwrap();
+                file.set_permissions(perms).await.unwrap();
             }
         }
 
-        // 2. Overwrite using open_secure_file (simulating new transfer)
-        let _file = open_secure_file(&file_path, 0)
-            .await
-            .expect("Failed to open secure file");
+        // 2. Overwrite using open_secure_file
+        let _file = open_secure_file(&file_path, 0).await.unwrap();
 
         // 3. Verify permissions are now 0o600
         #[cfg(unix)]

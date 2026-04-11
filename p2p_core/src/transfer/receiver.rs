@@ -19,7 +19,7 @@ pub async fn receive_file(
     // Enforce strict file size and name limits to prevent DoS
     if let Err(e) = validate_transfer_info(&file_info.file_name, file_info.file_size) {
         let _ = event_tx.send(AppEvent::Error(e.to_string())).await;
-        return Err(e);
+        return Err(anyhow::anyhow!(e));
     }
 
     file_info.file_name = sanitize_file_name(&file_info.file_name);
