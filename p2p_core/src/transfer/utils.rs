@@ -37,28 +37,14 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
     if offset > 0 {
         options.append(true);
     } else {
-        options.create(true).truncate(true);
+        // Safely unlink the file first if it exists to prevent TOCTOU on overwrite
+        let _ = tokio::fs::remove_file(path).await;
+        options.create_new(true);
         #[cfg(unix)]
         options.mode(0o600);
     }
 
-    let file = options.open(path).await?;
-
-    // If starting a new file (offset == 0), ensure secure permissions
-    // This is necessary because mode() only applies to new files, not existing ones
-    if offset == 0 {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = file.metadata().await?.permissions();
-            if perms.mode() & 0o777 != 0o600 {
-                perms.set_mode(0o600);
-                file.set_permissions(perms).await?;
-            }
-        }
-    }
-
-    Ok(file)
+    options.open(path).await
 }
 
 /// Format transfer speed from bytes and elapsed time
