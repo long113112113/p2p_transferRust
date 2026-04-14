@@ -97,23 +97,17 @@ pub fn create_secure_dir_all(path: &Path) -> std::io::Result<()> {
 
 pub fn write_secure_file(path: &Path, content: &str) -> std::io::Result<()> {
     use std::io::Write;
+
+    // Safely remove the file if it exists to prevent TOCTOU vulnerabilities
+    let _ = fs::remove_file(path);
+
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
 
     #[cfg(unix)]
     options.mode(0o600);
 
     let mut file = options.open(path)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = file.metadata()?.permissions();
-        if perms.mode() & 0o777 != 0o600 {
-            perms.set_mode(0o600);
-            file.set_permissions(perms)?;
-        }
-    }
 
     file.write_all(content.as_bytes())
 }

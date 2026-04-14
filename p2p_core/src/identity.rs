@@ -40,9 +40,12 @@ impl IdentityManager {
                     .context("Failed to create config directory")?;
             }
 
+            // Safely remove the file if it exists to prevent TOCTOU vulnerabilities
+            let _ = fs::remove_file(&key_path).await;
+
             // Use OpenOptions to set file permissions to 600 (read/write only by owner)
             let mut options = fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+            options.write(true).create_new(true);
 
             #[cfg(unix)]
             options.mode(0o600);
@@ -78,9 +81,12 @@ impl IdentityManager {
                 std::fs::create_dir_all(parent).context("Failed to create config directory")?;
             }
 
+            // Safely remove the file if it exists to prevent TOCTOU vulnerabilities
+            let _ = std::fs::remove_file(&key_path);
+
             // Use OpenOptions to set file permissions to 600 (read/write only by owner)
             let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+            options.write(true).create_new(true);
 
             #[cfg(unix)]
             options.mode(0o600);

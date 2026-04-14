@@ -67,3 +67,11 @@
 **Vulnerability:** The `create_secure_file` and `open_secure_file` functions relied on `OpenOptions::mode(0o600)` to set permissions. However, `mode` only applies when a *new* file is created. If the file already existed (even if truncated), the existing permissions were preserved, allowing pre-created world-readable files to remain insecure.
 **Learning:** `OpenOptions` flags like `create` and `truncate` handle file content but do not enforce metadata (permissions) on existing files. Security-critical file operations must explicitly set permissions on the open file handle to ensure the intended state.
 **Prevention:** Always use `file.set_permissions()` on the open file handle when creating or overwriting sensitive files, rather than relying solely on creation-time flags.
+
+## 2024-05-24 - Secure File Creation to Prevent TOCTOU
+
+**Vulnerability:** Time-of-Check to Time-of-Use (TOCTOU) vulnerability when creating sensitive files (like `node_secret.key` and `config.json`) using `OpenOptions::create(true).truncate(true)`. An attacker could pre-create the file with permissive permissions before the application truncates it, bypassing the `.mode(0o600)` check, which only applies to *newly* created files. Modifying permissions after opening an existing file via `set_permissions` is flawed because open file descriptors retain the old permissions.
+
+**Learning:** Using `create(true)` truncates existing files but does not enforce the provided `.mode()` on them. Furthermore, calling `set_permissions` after opening does not revoke existing handles, leaving a window of exploitation where a malicious actor can read or write to sensitive configurations.
+
+**Prevention:** To completely prevent TOCTOU race conditions when exclusively creating new sensitive files in Rust, safely unlink the file first (e.g., `tokio::fs::remove_file(path)`) before opening it with `OpenOptions::create_new(true)` and `.mode(...)`. Do not rely on truncation or retrospective permission changes.
