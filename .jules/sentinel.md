@@ -72,3 +72,12 @@
 **Vulnerability:** The secret key file (`node_secret.key`) in `p2p_core/src/identity.rs` was created using `OpenOptions::mode(0o600)` which fails to correctly enforce permissions if the file already exists and is being truncated, potentially leaving the private key readable by other users.
 **Learning:** `OpenOptions::mode` in Rust only sets permissions when *creating* a new file. If the file exists and is truncated/overwritten, its previous permissions are retained.
 **Prevention:** Explicitly use `set_permissions` after opening the file to guarantee permissions, or use dedicated helper functions (like `write_secure_file`) that encapsulate this logic properly.
+## 2026-03-18 - [Fix Mutex Poisoned State Vulnerability]
+**Vulnerability:** Mutex lock in `p2p_core/src/http_share/websocket/handler.rs` used `if let Ok(mut counts) = ...lock()` to handle internal state, skipping state cleanup if the Mutex was previously poisoned (e.g., from a panicking thread during an unwrap), potentially causing connection tracking leaks.
+**Learning:** In highly concurrent state handlers (like WebSockets), silently dropping on `Err` from `.lock()` allows minor panics to corrupt tracking state permanently across the application (e.g., IP connection counts not decrementing).
+**Prevention:** Use `let mut counts = ...lock().unwrap_or_else(|e| e.into_inner())` to safely recover the lock guard and continue state cleanup, allowing graceful degradation even if the Mutex was poisoned.
+
+## 2026-08-01 - Insecure File Permissions via TOCTOU
+**Vulnerability:** File creation using `OpenOptions::create(true)` followed by `set_permissions` is vulnerable to Time-of-Check to Time-of-Use (TOCTOU). An attacker can pre-create the file with permissive permissions (e.g., world-readable) before the program creates it. Because `create(true)` will just truncate an existing file and not reset its permissions, and because `set_permissions` leaves a race window where the file can still be accessed, the data is vulnerable.
+**Learning:** `create(true)` only truncates content and doesn't reset metadata. Modifying permissions after opening an existing file does not revoke handles for attackers who opened the file before the permission change.
+**Prevention:** To securely create files with exact permissions, safely delete any existing file (`fs::remove_file`) and use `OpenOptions::create_new(true)` with `.mode(0o600)`. This guarantees that the file is created atomically with the correct permissions.
