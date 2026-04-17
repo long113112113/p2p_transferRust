@@ -67,6 +67,11 @@
 **Vulnerability:** The `create_secure_file` and `open_secure_file` functions relied on `OpenOptions::mode(0o600)` to set permissions. However, `mode` only applies when a *new* file is created. If the file already existed (even if truncated), the existing permissions were preserved, allowing pre-created world-readable files to remain insecure.
 **Learning:** `OpenOptions` flags like `create` and `truncate` handle file content but do not enforce metadata (permissions) on existing files. Security-critical file operations must explicitly set permissions on the open file handle to ensure the intended state.
 **Prevention:** Always use `file.set_permissions()` on the open file handle when creating or overwriting sensitive files, rather than relying solely on creation-time flags.
+
+## 2024-03-15 - Identity Key Permission Overwrite Vulnerability
+**Vulnerability:** The secret key file (`node_secret.key`) in `p2p_core/src/identity.rs` was created using `OpenOptions::mode(0o600)` which fails to correctly enforce permissions if the file already exists and is being truncated, potentially leaving the private key readable by other users.
+**Learning:** `OpenOptions::mode` in Rust only sets permissions when *creating* a new file. If the file exists and is truncated/overwritten, its previous permissions are retained.
+**Prevention:** Explicitly use `set_permissions` after opening the file to guarantee permissions, or use dedicated helper functions (like `write_secure_file`) that encapsulate this logic properly.
 ## 2026-03-18 - [Fix Mutex Poisoned State Vulnerability]
 **Vulnerability:** Mutex lock in `p2p_core/src/http_share/websocket/handler.rs` used `if let Ok(mut counts) = ...lock()` to handle internal state, skipping state cleanup if the Mutex was previously poisoned (e.g., from a panicking thread during an unwrap), potentially causing connection tracking leaks.
 **Learning:** In highly concurrent state handlers (like WebSockets), silently dropping on `Err` from `.lock()` allows minor panics to corrupt tracking state permanently across the application (e.g., IP connection counts not decrementing).
