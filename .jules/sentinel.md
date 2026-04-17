@@ -71,3 +71,8 @@
 **Vulnerability:** Mutex lock in `p2p_core/src/http_share/websocket/handler.rs` used `if let Ok(mut counts) = ...lock()` to handle internal state, skipping state cleanup if the Mutex was previously poisoned (e.g., from a panicking thread during an unwrap), potentially causing connection tracking leaks.
 **Learning:** In highly concurrent state handlers (like WebSockets), silently dropping on `Err` from `.lock()` allows minor panics to corrupt tracking state permanently across the application (e.g., IP connection counts not decrementing).
 **Prevention:** Use `let mut counts = ...lock().unwrap_or_else(|e| e.into_inner())` to safely recover the lock guard and continue state cleanup, allowing graceful degradation even if the Mutex was poisoned.
+
+## 2026-08-01 - Insecure File Permissions via TOCTOU
+**Vulnerability:** File creation using `OpenOptions::create(true)` followed by `set_permissions` is vulnerable to Time-of-Check to Time-of-Use (TOCTOU). An attacker can pre-create the file with permissive permissions (e.g., world-readable) before the program creates it. Because `create(true)` will just truncate an existing file and not reset its permissions, and because `set_permissions` leaves a race window where the file can still be accessed, the data is vulnerable.
+**Learning:** `create(true)` only truncates content and doesn't reset metadata. Modifying permissions after opening an existing file does not revoke handles for attackers who opened the file before the permission change.
+**Prevention:** To securely create files with exact permissions, safely delete any existing file (`fs::remove_file`) and use `OpenOptions::create_new(true)` with `.mode(0o600)`. This guarantees that the file is created atomically with the correct permissions.
