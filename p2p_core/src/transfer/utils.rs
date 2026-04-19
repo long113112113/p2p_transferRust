@@ -47,6 +47,16 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
 
     let file = options.open(path).await?;
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = file.metadata().await?.permissions();
+        if perms.mode() & 0o777 != 0o600 {
+            perms.set_mode(0o600);
+            file.set_permissions(perms).await?;
+        }
+    }
+
     Ok(file)
 }
 
