@@ -47,6 +47,18 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
 
     let file = options.open(path).await?;
 
+    #[cfg(unix)]
+    if offset > 0 {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = file.metadata().await?.permissions();
+        if perms.mode() & 0o777 != 0o600 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "File permissions have been tampered with, refusing to resume transfer",
+            ));
+        }
+    }
+
     Ok(file)
 }
 
@@ -297,6 +309,50 @@ mod tests {
                 0o600,
                 "File permissions should be reset to 0o600 upon overwrite"
             );
+        }
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(&file_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_open_secure_file_resume_permissions() {
+        let temp_dir = std::env::temp_dir();
+        // Use a unique name
+        let file_path = temp_dir.join(format!(
+            "secure_resume_test_{}.txt",
+            uuid::Uuid::new_v4()
+        ));
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        {
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .await
+                .expect("Failed to create initial file");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).await.unwrap();
+            }
+        }
+
+        // 2. Resume using open_secure_file (simulating resuming transfer)
+        let result = open_secure_file(&file_path, 100).await; // offset > 0
+
+        // 3. Verify that the operation was rejected due to tampered permissions
+        assert!(
+            result.is_err(),
+            "Expected open_secure_file to fail on a resumed file with tampered permissions"
+        );
+
+        if let Err(e) = result {
+            assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
         }
 
         // Cleanup
