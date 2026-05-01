@@ -47,6 +47,19 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
 
     let file = options.open(path).await?;
 
+    #[cfg(unix)]
+    if offset > 0 {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = file.metadata().await?;
+        let mode = metadata.permissions().mode() & 0o777;
+        if mode != 0o600 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("Insecure permissions on existing file: {:o}", mode),
+            ));
+        }
+    }
+
     Ok(file)
 }
 
@@ -246,6 +259,54 @@ mod tests {
                 0o600,
                 "File permissions should be 0o600"
             );
+        }
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(&file_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_open_secure_file_append_insecure_fails() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!(
+            "secure_append_insecure_test_{}.txt",
+            uuid::Uuid::new_v4()
+        ));
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        {
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .await
+                .expect("Failed to create initial file");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).await.unwrap();
+            }
+        }
+
+        // 2. Attempt to open for appending (offset > 0)
+        let result = open_secure_file(&file_path, 1).await;
+
+        #[cfg(unix)]
+        {
+            // Should fail on Unix because permissions are 0o666 instead of 0o600
+            assert!(result.is_err(), "Opening insecure file for append should fail");
+            let err = result.unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+            assert!(err.to_string().contains("Insecure permissions"));
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-unix, we just expect it to succeed or ignore the check
+            assert!(result.is_ok());
         }
 
         // Cleanup
