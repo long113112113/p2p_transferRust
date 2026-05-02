@@ -47,6 +47,21 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
 
     let file = options.open(path).await?;
 
+    if offset > 0 {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = file.metadata().await?;
+            let permissions = metadata.permissions();
+            if (permissions.mode() & 0o777) != 0o600 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Insecure file permissions detected when appending. Must be 0o600.",
+                ));
+            }
+        }
+    }
+
     Ok(file)
 }
 
@@ -298,6 +313,46 @@ mod tests {
                 "File permissions should be reset to 0o600 upon overwrite"
             );
         }
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(&file_path).await;
+    }
+}
+
+#[cfg(test)]
+mod tests_security_appends {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_open_secure_file_append_insecure_fails() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!("secure_append_test_{}.txt", uuid::Uuid::new_v4()));
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        {
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .await
+                .expect("Failed to create initial file");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).await.unwrap();
+            }
+        }
+
+        // 2. Try to append to it
+        let res = open_secure_file(&file_path, 10).await;
+
+        assert!(
+            res.is_err(),
+            "Appending to a file with insecure permissions should fail"
+        );
 
         // Cleanup
         let _ = tokio::fs::remove_file(&file_path).await;

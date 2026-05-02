@@ -58,10 +58,16 @@ impl IdentityManager {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mut perms = file.metadata().await.context("Failed to get metadata")?.permissions();
+                let mut perms = file
+                    .metadata()
+                    .await
+                    .context("Failed to get metadata")?
+                    .permissions();
                 if perms.mode() & 0o777 != 0o600 {
                     perms.set_mode(0o600);
-                    file.set_permissions(perms).await.context("Failed to set file permissions")?;
+                    file.set_permissions(perms)
+                        .await
+                        .context("Failed to set file permissions")?;
                 }
             }
 
@@ -109,10 +115,14 @@ impl IdentityManager {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mut perms = file.metadata().context("Failed to get metadata")?.permissions();
+                let mut perms = file
+                    .metadata()
+                    .context("Failed to get metadata")?
+                    .permissions();
                 if perms.mode() & 0o777 != 0o600 {
                     perms.set_mode(0o600);
-                    file.set_permissions(perms).context("Failed to set file permissions")?;
+                    file.set_permissions(perms)
+                        .context("Failed to set file permissions")?;
                 }
             }
 
