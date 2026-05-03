@@ -1,6 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use p2p_core::http_share::server::create_router_with_websocket;
-use p2p_core::http_share::websocket::{ClientMessage, UploadState};
+use p2p_core::http_share::websocket::UploadState;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;

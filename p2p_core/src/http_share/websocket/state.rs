@@ -34,13 +34,13 @@ impl UploadState {
         &self,
         request_id: String,
         response_tx: oneshot::Sender<bool>,
-    ) -> bool {
+    ) -> Result<(), oneshot::Sender<bool>> {
         let mut pending = self.pending.write().await;
         if pending.len() >= MAX_PENDING_UPLOADS {
-            return false;
+            return Err(response_tx);
         }
         pending.insert(request_id, PendingUpload { response_tx });
-        true
+        Ok(())
     }
 
     /// Try to acquire an active upload slot
@@ -96,22 +96,22 @@ mod tests {
         // Fill up the state
         for i in 0..MAX_PENDING_UPLOADS {
             let (tx, _rx) = oneshot::channel();
-            let added = state.try_add_request(format!("req_{}", i), tx).await;
-            assert!(added, "Should accept request {}", i);
+            let result = state.try_add_request(format!("req_{}", i), tx).await;
+            assert!(result.is_ok(), "Should accept request {}", i);
         }
 
         // Try to add one more
         let (tx, _rx) = oneshot::channel();
-        let added = state.try_add_request("req_overflow".to_string(), tx).await;
-        assert!(!added, "Should reject request when full");
+        let result = state.try_add_request("req_overflow".to_string(), tx).await;
+        assert!(result.is_err(), "Should reject request when full");
 
         // Remove one
         respond_to_upload(&state, "req_0", true).await;
 
         // Try adding again
         let (tx, _rx) = oneshot::channel();
-        let added = state.try_add_request("req_retry".to_string(), tx).await;
-        assert!(added, "Should accept request after space freed");
+        let result = state.try_add_request("req_retry".to_string(), tx).await;
+        assert!(result.is_ok(), "Should accept request after space freed");
     }
 
     #[tokio::test]

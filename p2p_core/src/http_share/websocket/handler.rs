@@ -199,10 +199,11 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
     tokio::pin!(response_rx);
 
     // Store pending upload
-    if !state
+    if state
         .upload_state
         .try_add_request(request_id.clone(), response_tx)
         .await
+        .is_err()
     {
         tracing::warn!(
             "Rejecting upload from {}: Too many pending uploads",
