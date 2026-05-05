@@ -36,6 +36,27 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
 
     if offset > 0 {
         options.append(true);
+
+        let file = options.open(path).await?;
+
+        // When appending, we can't use create_new(true), so we must verify the existing
+        // file hasn't been tampered with. If an attacker pre-created it with permissive
+        // permissions, we must reject the append to avoid writing sensitive data into a
+        // public file. We shouldn't try to fix it with set_permissions here as the
+        // attacker already has an open file handle (TOCTOU).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = file.metadata().await?;
+            if metadata.permissions().mode() & 0o777 != 0o600 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Target file exists but has insecure permissions",
+                ));
+            }
+        }
+
+        return Ok(file);
     } else {
         // Remove existing file to prevent TOCTOU
         let _ = tokio::fs::remove_file(path).await;
@@ -246,6 +267,54 @@ mod tests {
                 0o600,
                 "File permissions should be 0o600"
             );
+        }
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(&file_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_open_secure_file_append_insecure_fails() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!(
+            "secure_append_test_{}.txt",
+            uuid::Uuid::new_v4()
+        ));
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        {
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .await
+                .expect("Failed to create initial file");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).await.unwrap();
+            }
+        }
+
+        // 2. Try to append using open_secure_file, this should fail because
+        // the existing file has insecure permissions.
+        let result = open_secure_file(&file_path, 100).await;
+
+        #[cfg(unix)]
+        {
+            assert!(result.is_err(), "Appending to an insecure file should fail");
+            let err = result.unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+            assert_eq!(err.to_string(), "Target file exists but has insecure permissions");
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-unix, we don't check permissions in the same way so it might succeed.
+            assert!(result.is_ok());
         }
 
         // Cleanup
