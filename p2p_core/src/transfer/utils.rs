@@ -47,6 +47,18 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
 
     let file = options.open(path).await?;
 
+    #[cfg(unix)]
+    if offset > 0 {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = file.metadata().await?;
+        if metadata.permissions().mode() & 0o777 != 0o600 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Insecure file permissions for append operation",
+            ));
+        }
+    }
+
     Ok(file)
 }
 
@@ -79,7 +91,7 @@ pub fn sanitize_file_name(file_name: &str) -> String {
     // 1. Get the last component using string splitting to be OS-agnostic
     // Split by / and \ and take the last part
     let file_name = file_name
-        .rsplit(|c| c == '/' || c == '\\')
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or(file_name);
 
@@ -247,6 +259,42 @@ mod tests {
                 "File permissions should be 0o600"
             );
         }
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(&file_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_open_secure_file_append_insecure_fails() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!(
+            "secure_append_test_{}.txt",
+            uuid::Uuid::new_v4()
+        ));
+
+        // 1. Create file with 0o666 (rw-rw-rw-)
+        {
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .await
+                .expect("Failed to create initial file");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.unwrap().permissions();
+                perms.set_mode(0o666);
+                file.set_permissions(perms).await.unwrap();
+            }
+        }
+
+        // 2. Append using open_secure_file, this should fail because the original permissions were too broad
+        let result = open_secure_file(&file_path, 100).await;
+
+        #[cfg(unix)]
+        assert!(result.is_err(), "Appending to a file with insecure permissions should fail");
 
         // Cleanup
         let _ = tokio::fs::remove_file(&file_path).await;
