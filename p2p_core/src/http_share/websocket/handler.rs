@@ -23,7 +23,11 @@ struct ConnectionGuard {
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         self.state.connection_count.fetch_sub(1, Ordering::SeqCst);
-        let mut counts = self.state.ip_counts.lock().unwrap_or_else(|e| e.into_inner());
+        let mut counts = self
+            .state
+            .ip_counts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(count) = counts.get_mut(&self.client_ip) {
             if *count > 0 {
                 *count -= 1;
