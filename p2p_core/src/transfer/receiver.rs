@@ -31,7 +31,7 @@ pub async fn receive_file(
         )))
         .await;
 
-    tokio::fs::create_dir_all(download_dir).await?;
+    crate::config::create_secure_dir_all_async(download_dir).await?;
     let file_path = download_dir.join(&file_info.file_name);
 
     let mut offset = 0;

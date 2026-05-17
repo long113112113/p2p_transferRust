@@ -95,6 +95,19 @@ pub fn create_secure_dir_all(path: &Path) -> std::io::Result<()> {
     builder.create(path)
 }
 
+pub async fn create_secure_dir_all_async(path: &Path) -> std::io::Result<()> {
+    let mut builder = tokio::fs::DirBuilder::new();
+    builder.recursive(true);
+
+    #[cfg(unix)]
+    {
+        // there is no os::unix::DirBuilderExt in tokio::fs, mode is inherent
+        builder.mode(0o700);
+    }
+
+    builder.create(path).await
+}
+
 pub fn write_secure_file(path: &Path, content: &str) -> std::io::Result<()> {
     use std::io::Write;
 

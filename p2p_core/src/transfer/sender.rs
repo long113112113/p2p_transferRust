@@ -4,7 +4,6 @@ use quinn::Endpoint;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc;
 
@@ -184,7 +183,7 @@ async fn send_single_file(
     event_tx: &mpsc::Sender<AppEvent>,
 ) -> Result<()> {
     // Open file
-    let mut file = File::open(file_path).await?;
+    let mut file = tokio::fs::File::open(file_path).await?;
     let metadata = file.metadata().await?;
     let file_size = metadata.len();
     let file_name = file_path
