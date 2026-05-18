@@ -351,7 +351,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<WebSocketState>, client
 
     // Prepare download path
     let download_dir = state.download_dir.clone();
-    if let Err(e) = tokio::fs::create_dir_all(&download_dir).await {
+    if let Err(e) = crate::config::create_secure_dir_all_async(&download_dir).await {
         tracing::error!("Failed to create download dir: {}", e);
         let _ = sender
             .send(Message::Text(
