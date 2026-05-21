@@ -35,7 +35,7 @@ impl IdentityManager {
         } else {
             let secret_key = SecretKey::generate(&mut rand::rng());
             if let Some(parent) = key_path.parent() {
-                fs::create_dir_all(parent)
+                crate::config::create_secure_dir_all_async(parent)
                     .await
                     .context("Failed to create config directory")?;
             }
@@ -88,7 +88,7 @@ impl IdentityManager {
         } else {
             let secret_key = SecretKey::generate(&mut rand::rng());
             if let Some(parent) = key_path.parent() {
-                std::fs::create_dir_all(parent).context("Failed to create config directory")?;
+                crate::config::create_secure_dir_all(parent).context("Failed to create config directory")?;
             }
 
             // Remove existing file if it exists to prevent TOCTOU

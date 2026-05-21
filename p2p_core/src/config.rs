@@ -82,7 +82,7 @@ impl AppConfig {
     }
 }
 
-pub fn create_secure_dir_all(path: &Path) -> std::io::Result<()> {
+pub fn create_secure_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
 
@@ -92,7 +92,19 @@ pub fn create_secure_dir_all(path: &Path) -> std::io::Result<()> {
         builder.mode(0o700);
     }
 
-    builder.create(path)
+    builder.create(path.as_ref())
+}
+
+pub async fn create_secure_dir_all_async(path: impl AsRef<Path>) -> std::io::Result<()> {
+    let mut builder = tokio::fs::DirBuilder::new();
+    builder.recursive(true);
+
+    #[cfg(unix)]
+    {
+        builder.mode(0o700);
+    }
+
+    builder.create(path.as_ref()).await
 }
 
 pub fn write_secure_file(path: &Path, content: &str) -> std::io::Result<()> {
