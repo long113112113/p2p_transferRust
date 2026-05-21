@@ -91,3 +91,8 @@
 **Vulnerability:** The configuration directory holding the sensitive `node_secret.key` was being created using default `tokio::fs::create_dir_all` and `std::fs::create_dir_all` functions, which do not enforce strict ownership permissions (`0o700`). This allowed broader access to sensitive identity keys.
 **Learning:** Default directory creation in Rust does not apply restrictive modes, leading to over-permissive directories. In Unix environments, directories holding sensitive secrets must be created with `0o700` (`rwx------`).
 **Prevention:** Always use custom helpers wrapping `tokio::fs::DirBuilder` and `std::fs::DirBuilder` to apply `.mode(0o700)` atomically when creating configuration or sensitive directories to restrict access to the file owner.
+
+## 2024-05-18 - [Fix Incomplete Path Sanitization in WAN Receiver]
+**Vulnerability:** Path traversal risk during file receiving over WAN. The local implementation of `sanitize_file_name` in `p2p_wan/src/receiver.rs` used a naive `Path::new(file_name).file_name()` approach. This approach fails to sanitize Windows reserved filenames or remove malicious control characters.
+**Learning:** Even if a function name `sanitize_file_name` is used, the implementation matters. The `p2p_wan` crate had re-implemented its own weak version instead of using the robust, cross-platform blocklist version created in `p2p_core::transfer::utils`.
+**Prevention:** Always use centralized, battle-tested security functions (like the `sanitize_file_name` helper in `p2p_core`) instead of re-implementing weak local versions that only handle basic OS path separators but ignore platform-specific reserved characters and control codes.
