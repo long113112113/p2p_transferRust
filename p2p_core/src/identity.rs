@@ -24,9 +24,32 @@ impl IdentityManager {
 
         if key_path.exists() {
             tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = fs::read(&key_path)
+
+            let mut file = fs::File::open(&key_path)
+                .await
+                .context("Failed to open secret key file")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = file.metadata().await.context("Failed to get metadata")?;
+                let mut perms = metadata.permissions();
+                if perms.mode() & 0o077 != 0 {
+                    tracing::warn!("Insecure permissions detected on secret key file. Attempting to fix...");
+                    perms.set_mode(0o600);
+                    if let Err(e) = file.set_permissions(perms).await {
+                        tracing::error!("Failed to fix permissions: {}", e);
+                        return Err(anyhow::anyhow!("Insecure file permissions for secret key file, and unable to fix automatically"));
+                    }
+                }
+            }
+
+            use tokio::io::AsyncReadExt;
+            let mut key_bytes = Vec::new();
+            file.read_to_end(&mut key_bytes)
                 .await
                 .context("Failed to read secret key file")?;
+
             let bytes: [u8; 32] = key_bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
@@ -79,7 +102,28 @@ impl IdentityManager {
 
         if key_path.exists() {
             tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = std::fs::read(&key_path).context("Failed to read secret key file")?;
+
+            let mut file = std::fs::File::open(&key_path).context("Failed to open secret key file")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = file.metadata().context("Failed to get metadata")?;
+                let mut perms = metadata.permissions();
+                if perms.mode() & 0o077 != 0 {
+                    tracing::warn!("Insecure permissions detected on secret key file. Attempting to fix...");
+                    perms.set_mode(0o600);
+                    if let Err(e) = file.set_permissions(perms) {
+                        tracing::error!("Failed to fix permissions: {}", e);
+                        return Err(anyhow::anyhow!("Insecure file permissions for secret key file, and unable to fix automatically"));
+                    }
+                }
+            }
+
+            use std::io::Read;
+            let mut key_bytes = Vec::new();
+            file.read_to_end(&mut key_bytes).context("Failed to read secret key file")?;
+
             let bytes: [u8; 32] = key_bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
