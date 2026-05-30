@@ -118,10 +118,6 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    headers.insert(
-        header::STRICT_TRANSPORT_SECURITY,
-        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
-    );
 
     response
 }
@@ -708,36 +704,6 @@ mod security_tests {
 
         // Should NOT contain the old permissive wildcards
         assert!(!csp.contains("ws: wss:"));
-    }
-
-    #[tokio::test]
-    async fn test_hsts_header_presence() {
-        let token = "test_token_hsts";
-        let (tx, _rx) = mpsc::channel(100);
-        let upload_state = Arc::new(UploadState::default());
-        let download_dir = PathBuf::from(".");
-        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
-
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri(format!("/{}", token))
-                    .header("Host", "127.0.0.1:8080")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        let hsts = response
-            .headers()
-            .get("strict-transport-security")
-            .expect("HSTS header should be present")
-            .to_str()
-            .unwrap();
-
-        assert!(hsts.contains("max-age=31536000"));
-        assert!(hsts.contains("includeSubDomains"));
     }
 
     #[test]
