@@ -118,6 +118,10 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
+    headers.insert(
+        header::STRICT_TRANSPORT_SECURITY,
+        HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
+    );
 
     response
 }
@@ -560,6 +564,34 @@ mod tests {
                 panic!("Timeout! Server did not close connection on invalid input.");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_hsts_header_presence() {
+        let token = "test_token_hsts";
+        let (tx, _rx) = mpsc::channel(100);
+        let upload_state = Arc::new(UploadState::default());
+        let download_dir = PathBuf::from(".");
+        let router = create_router_with_websocket(token, tx, upload_state, download_dir);
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/{}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let hsts = response
+            .headers()
+            .get("strict-transport-security")
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        assert_eq!(hsts, "max-age=63072000; includeSubDomains; preload");
     }
 
     #[tokio::test]
