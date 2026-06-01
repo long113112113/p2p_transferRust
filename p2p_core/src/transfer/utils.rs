@@ -51,7 +51,14 @@ pub async fn open_secure_file(path: &Path, offset: u64) -> std::io::Result<File>
     if offset > 0 {
         use std::os::unix::fs::PermissionsExt;
         let metadata = file.metadata().await?;
-        if metadata.permissions().mode() & 0o777 != 0o600 {
+        let mut perms = metadata.permissions();
+        if perms.mode() & 0o077 != 0 {
+            tracing::warn!(
+                "Insecure file permissions detected (group/other accessible). Attempting to fix..."
+            );
+            perms.set_mode(0o600);
+            let _ = file.set_permissions(perms).await;
+
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "Insecure file permissions for append operation",
@@ -90,10 +97,7 @@ pub fn generate_self_signed_cert()
 pub fn sanitize_file_name(file_name: &str) -> String {
     // 1. Get the last component using string splitting to be OS-agnostic
     // Split by / and \ and take the last part
-    let file_name = file_name
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(file_name);
+    let file_name = file_name.rsplit(['/', '\\']).next().unwrap_or(file_name);
 
     // 2. Filter characters
     // Disallow control characters, path separators, and Windows reserved characters (<>:"/\|?*)
@@ -267,10 +271,7 @@ mod tests {
     #[tokio::test]
     async fn test_open_secure_file_append_insecure_fails() {
         let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!(
-            "secure_append_test_{}.txt",
-            uuid::Uuid::new_v4()
-        ));
+        let file_path = temp_dir.join(format!("secure_append_test_{}.txt", uuid::Uuid::new_v4()));
 
         // 1. Create file with 0o666 (rw-rw-rw-)
         {
@@ -294,7 +295,10 @@ mod tests {
         let result = open_secure_file(&file_path, 100).await;
 
         #[cfg(unix)]
-        assert!(result.is_err(), "Appending to a file with insecure permissions should fail");
+        assert!(
+            result.is_err(),
+            "Appending to a file with insecure permissions should fail"
+        );
 
         // Cleanup
         let _ = tokio::fs::remove_file(&file_path).await;

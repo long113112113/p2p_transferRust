@@ -24,9 +24,33 @@ impl IdentityManager {
 
         if key_path.exists() {
             tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = fs::read(&key_path)
+            let mut file = fs::File::open(&key_path)
+                .await
+                .context("Failed to open existing secret key file")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file
+                    .metadata()
+                    .await
+                    .context("Failed to get metadata")?
+                    .permissions();
+                if perms.mode() & 0o077 != 0 {
+                    tracing::warn!(
+                        "Insecure secret key permissions detected (group/other accessible). Attempting to fix..."
+                    );
+                    perms.set_mode(0o600);
+                    let _ = file.set_permissions(perms).await;
+                }
+            }
+
+            let mut key_bytes = Vec::new();
+            use tokio::io::AsyncReadExt;
+            file.read_to_end(&mut key_bytes)
                 .await
                 .context("Failed to read secret key file")?;
+
             let bytes: [u8; 32] = key_bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
@@ -58,10 +82,16 @@ impl IdentityManager {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mut perms = file.metadata().await.context("Failed to get metadata")?.permissions();
+                let mut perms = file
+                    .metadata()
+                    .await
+                    .context("Failed to get metadata")?
+                    .permissions();
                 if perms.mode() & 0o777 != 0o600 {
                     perms.set_mode(0o600);
-                    file.set_permissions(perms).await.context("Failed to set file permissions")?;
+                    file.set_permissions(perms)
+                        .await
+                        .context("Failed to set file permissions")?;
                 }
             }
 
@@ -79,7 +109,30 @@ impl IdentityManager {
 
         if key_path.exists() {
             tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = std::fs::read(&key_path).context("Failed to read secret key file")?;
+            let mut file = std::fs::File::open(&key_path)
+                .context("Failed to open existing secret key file")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file
+                    .metadata()
+                    .context("Failed to get metadata")?
+                    .permissions();
+                if perms.mode() & 0o077 != 0 {
+                    tracing::warn!(
+                        "Insecure secret key permissions detected (group/other accessible). Attempting to fix..."
+                    );
+                    perms.set_mode(0o600);
+                    let _ = file.set_permissions(perms);
+                }
+            }
+
+            let mut key_bytes = Vec::new();
+            use std::io::Read;
+            file.read_to_end(&mut key_bytes)
+                .context("Failed to read secret key file")?;
+
             let bytes: [u8; 32] = key_bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
@@ -88,7 +141,8 @@ impl IdentityManager {
         } else {
             let secret_key = SecretKey::generate(&mut rand::rng());
             if let Some(parent) = key_path.parent() {
-                crate::config::create_secure_dir_all(parent).context("Failed to create config directory")?;
+                crate::config::create_secure_dir_all(parent)
+                    .context("Failed to create config directory")?;
             }
 
             // Remove existing file if it exists to prevent TOCTOU
@@ -109,10 +163,14 @@ impl IdentityManager {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mut perms = file.metadata().context("Failed to get metadata")?.permissions();
+                let mut perms = file
+                    .metadata()
+                    .context("Failed to get metadata")?
+                    .permissions();
                 if perms.mode() & 0o777 != 0o600 {
                     perms.set_mode(0o600);
-                    file.set_permissions(perms).context("Failed to set file permissions")?;
+                    file.set_permissions(perms)
+                        .context("Failed to set file permissions")?;
                 }
             }
 
