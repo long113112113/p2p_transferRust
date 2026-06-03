@@ -24,9 +24,22 @@ impl IdentityManager {
 
         if key_path.exists() {
             tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = fs::read(&key_path)
-                .await
-                .context("Failed to read secret key file")?;
+            let mut file = fs::File::open(&key_path).await.context("Failed to open secret key file")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().await.context("Failed to get metadata")?.permissions();
+                if perms.mode() & 0o077 != 0 {
+                    tracing::warn!("Insecure permissions on secret key file, attempting to fix");
+                    perms.set_mode(perms.mode() & !0o077);
+                    let _ = file.set_permissions(perms).await;
+                }
+            }
+
+            let mut key_bytes = Vec::new();
+            use tokio::io::AsyncReadExt;
+            file.read_to_end(&mut key_bytes).await.context("Failed to read secret key file")?;
             let bytes: [u8; 32] = key_bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
@@ -79,7 +92,22 @@ impl IdentityManager {
 
         if key_path.exists() {
             tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = std::fs::read(&key_path).context("Failed to read secret key file")?;
+            let mut file = std::fs::File::open(&key_path).context("Failed to open secret key file")?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = file.metadata().context("Failed to get metadata")?.permissions();
+                if perms.mode() & 0o077 != 0 {
+                    tracing::warn!("Insecure permissions on secret key file, attempting to fix");
+                    perms.set_mode(perms.mode() & !0o077);
+                    let _ = file.set_permissions(perms);
+                }
+            }
+
+            let mut key_bytes = Vec::new();
+            use std::io::Read;
+            file.read_to_end(&mut key_bytes).context("Failed to read secret key file")?;
             let bytes: [u8; 32] = key_bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
