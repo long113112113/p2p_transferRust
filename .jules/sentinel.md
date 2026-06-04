@@ -101,3 +101,8 @@
 **Vulnerability:** The `404.html` page embedded inline `<style>` tags. Because the server enforces a strict Content Security Policy (CSP) that explicitly disallows `'unsafe-inline'` for styles (`style-src 'self'`), modern browsers would block the rendering of these styles, potentially degrading the user experience or obfuscating security-critical error messages.
 **Learning:** Security controls like strict CSP (`style-src 'self'`) apply indiscriminately to all served assets. Relying on inline `<style>` or `<script>` tags in HTML templates inherently conflicts with these security measures, leading to broken interfaces when deployed in a secure environment.
 **Prevention:** Always externalize styles into separate `.css` files and link them using `<link rel="stylesheet">`. Never use inline styles in HTML assets served by a backend that enforces a strict Content Security Policy.
+
+## 2024-06-04 - TOCTOU Vulnerability in File Reading
+**Vulnerability:** Checking file existence with `path.exists()` before reading with `fs::read` or `fs::read_to_string` creates a Time-of-Check to Time-of-Use (TOCTOU) race condition, allowing an attacker to substitute a sensitive file (like a secret key or config) with a malicious one or change its permissions between the check and the read.
+**Learning:** `std::fs::read` and `std::fs::read_to_string` open the file implicitly without giving the caller a chance to verify the permissions of the actual file descriptor being read.
+**Prevention:** Always use `File::open()` to get a file descriptor, then verify the permissions on the open file handle (e.g., using `file.metadata()`) before reading its contents, avoiding separate `path.exists()` checks entirely.

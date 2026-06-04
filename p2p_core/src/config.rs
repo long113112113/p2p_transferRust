@@ -60,8 +60,29 @@ impl AppConfig {
             None => return Self::default(),
         };
 
-        match fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        match std::fs::File::open(&path) {
+            Ok(mut file) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = file.metadata() {
+                        let mut perms = metadata.permissions();
+                        if perms.mode() & 0o077 != 0 {
+                            eprintln!("Warning: Overly permissive file permissions on config file, attempting to fix");
+                            perms.set_mode(perms.mode() & !0o077);
+                            let _ = file.set_permissions(perms);
+                        }
+                    }
+                }
+
+                let mut content = String::new();
+                use std::io::Read;
+                if file.read_to_string(&mut content).is_ok() {
+                    serde_json::from_str(&content).unwrap_or_default()
+                } else {
+                    Self::default()
+                }
+            }
             Err(_) => Self::default(),
         }
     }
@@ -139,10 +160,27 @@ pub fn get_or_create_endpoint_id() -> String {
 
     let endpoint_id_path = config_dir.join(ENDPOINT_ID_FILE);
 
-    if let Ok(id) = fs::read_to_string(&endpoint_id_path) {
-        let id = id.trim().to_string();
-        if !id.is_empty() {
-            return id;
+    if let Ok(mut file) = std::fs::File::open(&endpoint_id_path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = file.metadata() {
+                let mut perms = metadata.permissions();
+                if perms.mode() & 0o077 != 0 {
+                    eprintln!("Warning: Overly permissive file permissions on endpoint id file, attempting to fix");
+                    perms.set_mode(perms.mode() & !0o077);
+                    let _ = file.set_permissions(perms);
+                }
+            }
+        }
+
+        let mut id = String::new();
+        use std::io::Read;
+        if file.read_to_string(&mut id).is_ok() {
+            let id = id.trim().to_string();
+            if !id.is_empty() {
+                return id;
+            }
         }
     }
 
