@@ -22,54 +22,71 @@ impl IdentityManager {
     pub async fn load_or_generate(&self) -> Result<SecretKey> {
         let key_path = self.config_dir.join(KEY_FILE_NAME);
 
-        if key_path.exists() {
-            tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = fs::read(&key_path)
-                .await
-                .context("Failed to read secret key file")?;
-            let bytes: [u8; 32] = key_bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
+        match fs::File::open(&key_path).await {
+            Ok(mut file) => {
+                tracing::info!("Loading existing identity from {:?}", key_path);
 
-            Ok(SecretKey::from_bytes(&bytes))
-        } else {
-            let secret_key = SecretKey::generate(&mut rand::rng());
-            if let Some(parent) = key_path.parent() {
-                crate::config::create_secure_dir_all_async(parent)
-                    .await
-                    .context("Failed to create config directory")?;
-            }
-
-            // Remove existing file if it exists to prevent TOCTOU
-            let _ = fs::remove_file(&key_path).await;
-
-            // Use OpenOptions to set file permissions to 600 (read/write only by owner)
-            let mut options = fs::OpenOptions::new();
-            options.write(true).create_new(true);
-
-            #[cfg(unix)]
-            options.mode(0o600);
-
-            let mut file = options
-                .open(&key_path)
-                .await
-                .context("Failed to open secret key file for writing")?;
-
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut perms = file.metadata().await.context("Failed to get metadata")?.permissions();
-                if perms.mode() & 0o777 != 0o600 {
-                    perms.set_mode(0o600);
-                    file.set_permissions(perms).await.context("Failed to set file permissions")?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = file.metadata().await.context("Failed to get metadata")?.permissions();
+                    if perms.mode() & 0o077 != 0 {
+                        tracing::warn!("Secret key file has overly permissive group/other permissions. Attempting to fix. Note: TOCTOU risk exists if attacker holds descriptor.");
+                        perms.set_mode(perms.mode() & !0o077);
+                        let _ = file.set_permissions(perms).await;
+                    }
                 }
+
+                let mut key_bytes = Vec::new();
+                use tokio::io::AsyncReadExt;
+                file.read_to_end(&mut key_bytes).await.context("Failed to read secret key file")?;
+
+                let bytes: [u8; 32] = key_bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
+
+                Ok(SecretKey::from_bytes(&bytes))
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let secret_key = SecretKey::generate(&mut rand::rng());
+                if let Some(parent) = key_path.parent() {
+                    crate::config::create_secure_dir_all_async(parent)
+                        .await
+                        .context("Failed to create config directory")?;
+                }
 
-            file.write_all(&secret_key.to_bytes())
-                .await
-                .context("Failed to write secret key")?;
+                // Remove existing file if it exists to prevent TOCTOU
+                let _ = fs::remove_file(&key_path).await;
 
-            Ok(secret_key)
+                // Use OpenOptions to set file permissions to 600 (read/write only by owner)
+                let mut options = fs::OpenOptions::new();
+                options.write(true).create_new(true);
+
+                #[cfg(unix)]
+                options.mode(0o600);
+
+                let mut file = options
+                    .open(&key_path)
+                    .await
+                    .context("Failed to open secret key file for writing")?;
+
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = file.metadata().await.context("Failed to get metadata")?.permissions();
+                    if perms.mode() & 0o777 != 0o600 {
+                        perms.set_mode(0o600);
+                        file.set_permissions(perms).await.context("Failed to set file permissions")?;
+                    }
+                }
+
+                file.write_all(&secret_key.to_bytes())
+                    .await
+                    .context("Failed to write secret key")?;
+
+                Ok(secret_key)
+            }
+            Err(e) => Err(anyhow::Error::from(e).context("Failed to open secret key file")),
         }
     }
 
@@ -77,49 +94,68 @@ impl IdentityManager {
     pub fn load_or_generate_sync(&self) -> Result<SecretKey> {
         let key_path = self.config_dir.join(KEY_FILE_NAME);
 
-        if key_path.exists() {
-            tracing::info!("Loading existing identity from {:?}", key_path);
-            let key_bytes = std::fs::read(&key_path).context("Failed to read secret key file")?;
-            let bytes: [u8; 32] = key_bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
+        match std::fs::File::open(&key_path) {
+            Ok(mut file) => {
+                tracing::info!("Loading existing identity from {:?}", key_path);
 
-            Ok(SecretKey::from_bytes(&bytes))
-        } else {
-            let secret_key = SecretKey::generate(&mut rand::rng());
-            if let Some(parent) = key_path.parent() {
-                crate::config::create_secure_dir_all(parent).context("Failed to create config directory")?;
-            }
-
-            // Remove existing file if it exists to prevent TOCTOU
-            let _ = std::fs::remove_file(&key_path);
-
-            // Use OpenOptions to set file permissions to 600 (read/write only by owner)
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-
-            #[cfg(unix)]
-            options.mode(0o600);
-
-            use std::io::Write;
-            let mut file = options
-                .open(&key_path)
-                .context("Failed to open secret key file for writing")?;
-
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut perms = file.metadata().context("Failed to get metadata")?.permissions();
-                if perms.mode() & 0o777 != 0o600 {
-                    perms.set_mode(0o600);
-                    file.set_permissions(perms).context("Failed to set file permissions")?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = file.metadata().context("Failed to get metadata")?.permissions();
+                    if perms.mode() & 0o077 != 0 {
+                        tracing::warn!("Secret key file has overly permissive group/other permissions. Attempting to fix. Note: TOCTOU risk exists if attacker holds descriptor.");
+                        perms.set_mode(perms.mode() & !0o077);
+                        let _ = file.set_permissions(perms);
+                    }
                 }
+
+                let mut key_bytes = Vec::new();
+                use std::io::Read;
+                file.read_to_end(&mut key_bytes).context("Failed to read secret key file")?;
+
+                let bytes: [u8; 32] = key_bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Invalid secret key length in file"))?;
+
+                Ok(SecretKey::from_bytes(&bytes))
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let secret_key = SecretKey::generate(&mut rand::rng());
+                if let Some(parent) = key_path.parent() {
+                    crate::config::create_secure_dir_all(parent).context("Failed to create config directory")?;
+                }
 
-            file.write_all(&secret_key.to_bytes())
-                .context("Failed to write secret key")?;
+                // Remove existing file if it exists to prevent TOCTOU
+                let _ = std::fs::remove_file(&key_path);
 
-            Ok(secret_key)
+                // Use OpenOptions to set file permissions to 600 (read/write only by owner)
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+
+                #[cfg(unix)]
+                options.mode(0o600);
+
+                use std::io::Write;
+                let mut file = options
+                    .open(&key_path)
+                    .context("Failed to open secret key file for writing")?;
+
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = file.metadata().context("Failed to get metadata")?.permissions();
+                    if perms.mode() & 0o777 != 0o600 {
+                        perms.set_mode(0o600);
+                        file.set_permissions(perms).context("Failed to set file permissions")?;
+                    }
+                }
+
+                file.write_all(&secret_key.to_bytes())
+                    .context("Failed to write secret key")?;
+
+                Ok(secret_key)
+            }
+            Err(e) => Err(anyhow::Error::from(e).context("Failed to open secret key file")),
         }
     }
 
