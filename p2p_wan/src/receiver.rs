@@ -54,7 +54,7 @@ pub async fn receive_file(
         )))
         .await;
 
-    tokio::fs::create_dir_all(download_dir).await?;
+    p2p_core::config::create_secure_dir_all_async(download_dir).await?;
     let file_path = download_dir.join(&file_name);
     let mut offset = 0u64;
     if file_path.exists() {
