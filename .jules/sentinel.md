@@ -116,3 +116,8 @@
 **Vulnerability:** The application was using the standard `tokio::fs::create_dir_all` to create download directories in both `p2p_core/src/http_share/websocket/handler.rs` and `p2p_core/src/transfer/receiver.rs`. This relies on the default umask and may create overly permissive directories, potentially allowing unauthorized access to files downloaded or transferred by the user.
 **Learning:** Default directory creation in Rust does not apply restrictive modes, potentially leading to over-permissive directories for user data. Just like with configuration directories, user data directories should enforce strict permissions.
 **Prevention:** Always use custom helper functions like `crate::config::create_secure_dir_all_async` that correctly set strict permissions (e.g. `0o700` on Unix) when creating directories intended to hold sensitive or user-downloaded files.
+
+## 2026-08-01 - [Insecure Download Directory Permissions in WAN]
+**Vulnerability:** The application was using the standard `tokio::fs::create_dir_all` to create download directories in `p2p_wan/src/receiver.rs`. This relies on the default umask and may create overly permissive directories, potentially allowing unauthorized access to files downloaded or transferred over the WAN by the user.
+**Learning:** Default directory creation in Rust does not apply restrictive modes, potentially leading to over-permissive directories for user data. Just like with configuration directories, user data directories should enforce strict permissions.
+**Prevention:** Always use custom helper functions like `p2p_core::config::create_secure_dir_all_async` that correctly set strict permissions (e.g. `0o700` on Unix) when creating directories intended to hold sensitive or user-downloaded files.
