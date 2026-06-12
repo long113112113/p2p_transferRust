@@ -1,5 +1,5 @@
 use anyhow::Result;
-use p2p_core::transfer::utils::{open_secure_file, validate_transfer_info, sanitize_file_name};
+use p2p_core::transfer::utils::{open_secure_file, sanitize_file_name, validate_transfer_info};
 use p2p_core::{AppEvent, FileInfo};
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
@@ -54,7 +54,7 @@ pub async fn receive_file(
         )))
         .await;
 
-    tokio::fs::create_dir_all(download_dir).await?;
+    p2p_core::config::create_secure_dir_all_async(download_dir).await?;
     let file_path = download_dir.join(&file_name);
     let mut offset = 0u64;
     if file_path.exists() {
